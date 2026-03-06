@@ -29,11 +29,11 @@ Repo: github.com/Velocity-AEO/vaeo-platform
 - [x] C18 — Lighthouse validator
 - [x] C19 — W3C HTML validator
 - [x] C20 — Schema validator
+- [x] C21 — Axe accessibility validator
 
 ### In Progress
 
 ### Not Started
-- [ ] C21 — Axe accessibility validator
 - [ ] C22 — Playwright visual diff
 - [ ] C23 — vaeo connect
 - [ ] C24 — vaeo crawl
@@ -56,3 +56,4 @@ Repo: github.com/Velocity-AEO/vaeo-platform
 - C18 Lighthouse validator — Claude Code — March 6 2026
 - C19 W3C HTML validator — Claude Code — March 6 2026
 - C20 Schema validator — Claude Code — March 6 2026
+- C21 Axe accessibility validator — Claude Code — March 6 2026
