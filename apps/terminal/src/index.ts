@@ -21,6 +21,7 @@ import {
   verifyRollback,
 } from '../../../packages/patch-engine/src/rollback-runner.js';
 import { runConnectCli } from '../../../packages/commands/src/connect.js';
+import { runCrawlCli }   from '../../../packages/commands/src/crawl.js';
 
 // Type imports are referenced here so the file is the declared consumer of the
 // platform contracts. Implementations will import from packages/core/types.ts
@@ -63,10 +64,17 @@ program
 program
   .command('crawl')
   .description('Crawl all URLs for a site and build the canonical URL inventory')
-  .option('--site <domain>', 'Site domain to crawl')
-  .option('--run <id>', 'Run ID to associate with this crawl (default: auto-generated)')
-  .action(() => {
-    console.log('[vaeo crawl] not yet implemented');
+  .requiredOption('--site-id <uuid>',   'Site UUID (from vaeo connect)')
+  .requiredOption('--tenant-id <uuid>', 'Tenant UUID')
+  .option('--max-urls <n>',             'Maximum URLs to crawl (default: 2000)', parseInt)
+  .option('--depth <n>',                'Maximum crawl depth from start URL (default: 3)', parseInt)
+  .action(async (opts: {
+    siteId:   string;
+    tenantId: string;
+    maxUrls?: number;
+    depth?:   number;
+  }) => {
+    await runCrawlCli(opts);
   });
 
 // ── vaeo audit ───────────────────────────────────────────────────────────────
