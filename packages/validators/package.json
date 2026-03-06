@@ -6,7 +6,7 @@
   "main": "./src/lighthouse.ts",
   "types": "./src/lighthouse.ts",
   "scripts": {
-    "test": "node --import tsx/esm --test src/lighthouse.test.ts src/w3c.test.ts"
+    "test": "node --import tsx/esm --test src/lighthouse.test.ts src/w3c.test.ts src/schema.test.ts"
   },
   "dependencies": {},
   "devDependencies": {
