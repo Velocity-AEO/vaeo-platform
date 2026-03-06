@@ -6,11 +6,16 @@
   "main": "./src/lighthouse.ts",
   "types": "./src/lighthouse.ts",
   "scripts": {
-    "test": "node --import tsx/esm --test src/lighthouse.test.ts src/w3c.test.ts src/schema.test.ts src/axe.test.ts"
+    "test": "node --import tsx/esm --test src/lighthouse.test.ts src/w3c.test.ts src/schema.test.ts src/axe.test.ts src/visual-diff.test.ts"
   },
-  "dependencies": {},
+  "dependencies": {
+    "pixelmatch": "^7.1.0",
+    "pngjs": "^7.0.0"
+  },
   "devDependencies": {
     "@types/node": "^25.3.5",
+    "@types/pixelmatch": "^5.2.6",
+    "@types/pngjs": "^6.0.5",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3"
   }
