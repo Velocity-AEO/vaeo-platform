@@ -1,5 +1,5 @@
 # Velocity AEO — Ground Truth
-Last updated: March 5, 2026
+Last updated: March 6, 2026
 Repo: github.com/Velocity-AEO/vaeo-platform
 
 ## MVP Scope (Locked)
@@ -18,12 +18,12 @@ Repo: github.com/Velocity-AEO/vaeo-platform
 - [x] C7 — Truth-server (packages/truth-server/src/index.ts)
 
 - [x] C8 — Patch engine + rollback manifest (packages/patch-engine/src/index.ts)
+- [x] C9 — Rollback from manifest (packages/patch-engine/src/rollback-runner.ts)
+- [x] C10 — ActionLog (packages/action-log/src/index.ts)
 
 ### In Progress
 
 ### Not Started
-- [ ] C9 — Rollback from manifest
-- [ ] C10 — ActionLog
 - [ ] C11 — BullMQ job queue
 - [ ] C12 — Guardrail state machine
 - [ ] C13 — Crawlee crawler
@@ -50,4 +50,4 @@ Repo: github.com/Velocity-AEO/vaeo-platform
 - POC test bed: ~/VAEO-shopify-safe (Cococabanna ops — never add platform code here)
 
 ## Last Built
-- C7 truth-server — Claude Code — March 5 2026
+- C10 action-log — Claude Code — March 6 2026
