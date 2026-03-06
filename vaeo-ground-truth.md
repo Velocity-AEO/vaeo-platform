@@ -23,9 +23,9 @@ Repo: github.com/Velocity-AEO/vaeo-platform
 - [x] C12 — Guardrail state machine
 - [x] C13 — Crawlee crawler
 - [x] C14 — Issue detectors
+- [x] C15 — Risk scorer
 
 ### In Progress
-- [ ] C15 — Risk scorer
 
 ### Not Started
 - [ ] C16 — AI content generator
@@ -50,3 +50,4 @@ Repo: github.com/Velocity-AEO/vaeo-platform
 
 ## Last Built
 - C14 Issue detectors — Claude Code — March 6 2026
+- C15 Risk scorer — Claude Code — March 6 2026
