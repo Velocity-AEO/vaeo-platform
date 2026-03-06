@@ -17,8 +17,9 @@ Repo: github.com/Velocity-AEO/vaeo-platform
 - [x] C6 — Shopify adapter (packages/adapters/shopify/src/index.ts)
 - [x] C7 — Truth-server (packages/truth-server/src/index.ts)
 
+- [x] C8 — Patch engine + rollback manifest (packages/patch-engine/src/index.ts)
+
 ### In Progress
-- [ ] C8 — Patch engine + rollback manifest
 
 ### Not Started
 - [ ] C9 — Rollback from manifest
