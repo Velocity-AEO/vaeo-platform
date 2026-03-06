@@ -1,0 +1,29 @@
+# Secrets / env — env.core is the ONLY source of truth; .env must not exist
+.env
+.env.*
+!.env.example
+env.core
+env.core.*
+!env.core.example
+env.rtf
+env/
+*.rtf
+env.cloudconvert
+client_secret*.json
+*-b876ae9a9f51.json
+
+# Runtime artifacts
+actionlog/
+/proofpack/
+outputs/proofpack_*
+
+# Node / tooling
+node_modules/
+dist/
+coverage/
+
+# Outputs (optional - you may choose to track later)
+outputs/
+
+# OS
+.DS_Store

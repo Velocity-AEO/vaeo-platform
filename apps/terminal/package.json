@@ -1,0 +1,19 @@
+{
+  "name": "@vaeo/terminal",
+  "version": "1.2.0",
+  "type": "module",
+  "bin": {
+    "vaeo": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "commander": "^12.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.7",
+    "tsx": "^4.21.0",
+    "typescript": "^5.7.2"
+  }
+}
