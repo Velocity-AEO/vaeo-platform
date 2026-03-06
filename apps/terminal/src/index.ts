@@ -20,6 +20,7 @@ import {
   executeRollback,
   verifyRollback,
 } from '../../../packages/patch-engine/src/rollback-runner.js';
+import { runConnectCli } from '../../../packages/commands/src/connect.js';
 
 // Type imports are referenced here so the file is the declared consumer of the
 // platform contracts. Implementations will import from packages/core/types.ts
@@ -37,11 +38,24 @@ program
 
 program
   .command('connect')
-  .description('Authenticate with a CMS and store credentials for subsequent commands')
-  .option('--cms <type>', 'CMS target: shopify | wordpress')
-  .option('--site <domain>', 'Site domain (e.g. cococabanalife.com)')
-  .action(() => {
-    console.log('[vaeo connect] not yet implemented');
+  .description('Authenticate with a CMS and register the site with VAEO')
+  .requiredOption('--cms <type>',         'CMS target: shopify | wordpress')
+  .requiredOption('--tenant-id <id>',     'Tenant UUID')
+  .option('--store <url>',                'Shopify store URL (mystore.myshopify.com)')
+  .option('--token <token>',              'Shopify Admin API access token')
+  .option('--url <url>',                  'WordPress site URL (https://mysite.com)')
+  .option('--username <username>',        'WordPress admin username')
+  .option('--app-password <password>',    'WordPress Application Password')
+  .action(async (opts: {
+    cms:         string;
+    tenantId:    string;
+    store?:      string;
+    token?:      string;
+    url?:        string;
+    username?:   string;
+    appPassword?: string;
+  }) => {
+    await runConnectCli(opts);
   });
 
 // ── vaeo crawl ───────────────────────────────────────────────────────────────
