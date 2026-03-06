@@ -22,12 +22,12 @@ Repo: github.com/Velocity-AEO/vaeo-platform
 - [x] C11 — BullMQ job queue
 - [x] C12 — Guardrail state machine
 - [x] C13 — Crawlee crawler
+- [x] C14 — Issue detectors
 
 ### In Progress
-- [ ] C14 — Issue detectors
+- [ ] C15 — Risk scorer
 
 ### Not Started
-- [ ] C15 — Risk scorer
 - [ ] C16 — AI content generator
 - [ ] C17 — Schema template engine
 - [ ] C18 — Lighthouse validator
@@ -49,4 +49,4 @@ Repo: github.com/Velocity-AEO/vaeo-platform
 - POC test bed: ~/VAEO-shopify-safe (Cococabanna ops — never add platform code here)
 
 ## Last Built
-- C13 Crawlee crawler — Claude Code — March 6 2026
+- C14 Issue detectors — Claude Code — March 6 2026
