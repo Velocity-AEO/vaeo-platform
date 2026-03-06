@@ -32,11 +32,11 @@ Repo: github.com/Velocity-AEO/vaeo-platform
 - [x] C21 — Axe accessibility validator
 - [x] C22 — Playwright visual diff
 - [x] C23 — vaeo connect
+- [x] C24 — vaeo crawl
 
 ### In Progress
 
 ### Not Started
-- [ ] C24 — vaeo crawl
 - [ ] C25 — vaeo audit
 - [ ] C26 — vaeo optimize
 - [ ] C27 — vaeo verify
@@ -59,3 +59,4 @@ Repo: github.com/Velocity-AEO/vaeo-platform
 - C21 Axe accessibility validator — Claude Code — March 6 2026
 - C22 Playwright visual diff — Claude Code — March 6 2026
 - C23 vaeo connect — Claude Code — March 6 2026
+- C24 vaeo crawl — Claude Code — March 6 2026
