@@ -26,11 +26,11 @@ Repo: github.com/Velocity-AEO/vaeo-platform
 - [x] C15 — Risk scorer
 - [x] C16 — AI content generator
 - [x] C17 — Schema template engine
+- [x] C18 — Lighthouse validator
 
 ### In Progress
 
 ### Not Started
-- [ ] C18 — Lighthouse validator
 - [ ] C19 — W3C HTML validator
 - [ ] C20 — Schema validator
 - [ ] C21 — Axe accessibility validator
@@ -53,3 +53,4 @@ Repo: github.com/Velocity-AEO/vaeo-platform
 - C15 Risk scorer — Claude Code — March 6 2026
 - C16 AI content generator — Claude Code — March 6 2026
 - C17 Schema template engine — Claude Code — March 6 2026
+- C18 Lighthouse validator — Claude Code — March 6 2026
