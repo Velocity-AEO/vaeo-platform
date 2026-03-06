@@ -27,7 +27,6 @@ Repo: github.com/Velocity-AEO/vaeo-platform
 - [ ] C14 — Issue detectors
 
 ### Not Started
-- [ ] C14 — Issue detectors
 - [ ] C15 — Risk scorer
 - [ ] C16 — AI content generator
 - [ ] C17 — Schema template engine
