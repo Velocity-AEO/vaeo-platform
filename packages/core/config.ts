@@ -44,10 +44,18 @@ export interface VaeoConfig {
     serviceRoleKey: string;
   };
 
-  // Upstash Redis
+  // Upstash Redis — REST API (for @upstash/redis SDK)
   upstash: {
     redisRestUrl: string;
     redisRestToken: string;
+  };
+
+  // Redis — RESP protocol endpoint (for BullMQ / ioredis)
+  redis: {
+    /** Full Redis RESP URL, e.g. rediss://xxx.upstash.io:6380 */
+    url: string;
+    /** Upstash token used as the ioredis password. */
+    token: string;
   };
 
   // Cloudflare R2
@@ -134,6 +142,11 @@ function loadConfig(): VaeoConfig {
     upstash: {
       redisRestUrl:   required('UPSTASH_REDIS_REST_URL'),
       redisRestToken: required('UPSTASH_REDIS_REST_TOKEN'),
+    },
+
+    redis: {
+      url:   required('REDIS_URL'),
+      token: required('REDIS_TOKEN'),
     },
 
     r2: {
