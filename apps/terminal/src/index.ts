@@ -16,6 +16,10 @@ import type {
   InjectionRegistry,
   GuardrailDecision,
 } from '../../../packages/core/types.js';
+import {
+  executeRollback,
+  verifyRollback,
+} from '../../../packages/patch-engine/src/rollback-runner.js';
 
 // Type imports are referenced here so the file is the declared consumer of the
 // platform contracts. Implementations will import from packages/core/types.ts
@@ -102,10 +106,32 @@ program
 program
   .command('rollback')
   .description('Restore all fields in a patch manifest to their before_value')
-  .option('--site <domain>', 'Site domain')
-  .option('--run <id>', 'Run ID of the manifest to roll back')
-  .action(() => {
-    console.log('[vaeo rollback] not yet implemented');
+  .requiredOption('--run-id <id>', 'Run ID of the manifest to roll back')
+  .requiredOption('--tenant <id>', 'Tenant ID that owns this run')
+  .action(async (opts: { runId: string; tenant: string }) => {
+    try {
+      // Step 1: reverse every change in reverse order
+      const result = await executeRollback(opts.runId, opts.tenant);
+
+      console.log(
+        `✓ Rollback complete — ${result.fields_reversed} fields reversed in ${result.time_ms}ms`,
+      );
+
+      // Step 2: confirm every field actually went back
+      const verify = await verifyRollback(opts.runId, opts.tenant);
+
+      if (verify.verified) {
+        console.log('✓ Verification passed — all fields restored correctly');
+      } else {
+        console.error(
+          `✗ Verification failed — mismatches: ${verify.mismatches.join(', ')}`,
+        );
+        process.exitCode = 1;
+      }
+    } catch (err) {
+      console.error(`✗ Rollback failed: ${err instanceof Error ? err.message : String(err)}`);
+      process.exitCode = 1;
+    }
   });
 
 // ── vaeo log ─────────────────────────────────────────────────────────────────
