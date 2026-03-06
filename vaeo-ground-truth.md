@@ -28,11 +28,11 @@ Repo: github.com/Velocity-AEO/vaeo-platform
 - [x] C17 — Schema template engine
 - [x] C18 — Lighthouse validator
 - [x] C19 — W3C HTML validator
+- [x] C20 — Schema validator
 
 ### In Progress
 
 ### Not Started
-- [ ] C20 — Schema validator
 - [ ] C21 — Axe accessibility validator
 - [ ] C22 — Playwright visual diff
 - [ ] C23 — vaeo connect
@@ -55,3 +55,4 @@ Repo: github.com/Velocity-AEO/vaeo-platform
 - C17 Schema template engine — Claude Code — March 6 2026
 - C18 Lighthouse validator — Claude Code — March 6 2026
 - C19 W3C HTML validator — Claude Code — March 6 2026
+- C20 Schema validator — Claude Code — March 6 2026
