@@ -11,21 +11,20 @@ Repo: github.com/Velocity-AEO/vaeo-platform
 ### Done
 - [x] C1 — WordPress adapter
 - [x] C2 — Duplicate files resolved
-- [x] C3 — Core interfaces locked (packages/core/types.ts)
-- [x] C4 — Single CLI entry point (apps/terminal/src/index.ts)
-- [x] C5 — Environment variables consolidated (packages/core/config.ts)
-- [x] C6 — Shopify adapter (packages/adapters/shopify/src/index.ts)
-- [x] C7 — Truth-server (packages/truth-server/src/index.ts)
-
-- [x] C8 — Patch engine + rollback manifest (packages/patch-engine/src/index.ts)
-- [x] C9 — Rollback from manifest (packages/patch-engine/src/rollback-runner.ts)
-- [x] C10 — ActionLog (packages/action-log/src/index.ts)
+- [x] C3 — Core interfaces locked
+- [x] C4 — Single CLI entry point
+- [x] C5 — Environment variables
+- [x] C6 — Shopify adapter
+- [x] C7 — Truth-server
+- [x] C8 — Patch engine
+- [x] C9 — Rollback runner
+- [x] C10 — ActionLog
+- [x] C11 — BullMQ job queue
 
 ### In Progress
+- [ ] C12 — Guardrail state machine
 
 ### Not Started
-- [ ] C11 — BullMQ job queue
-- [ ] C12 — Guardrail state machine
 - [ ] C13 — Crawlee crawler
 - [ ] C14 — Issue detectors
 - [ ] C15 — Risk scorer
@@ -50,4 +49,4 @@ Repo: github.com/Velocity-AEO/vaeo-platform
 - POC test bed: ~/VAEO-shopify-safe (Cococabanna ops — never add platform code here)
 
 ## Last Built
-- C10 action-log — Claude Code — March 6 2026
+- C11 BullMQ job queue — Claude Code — March 6 2026
