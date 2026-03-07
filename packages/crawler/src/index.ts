@@ -1,560 +1,317 @@
 /**
  * packages/crawler/src/index.ts
  *
- * Discovery engine for Velocity AEO.
+ * Site discovery engine for Velocity AEO.
+ * Uses CheerioCrawler from crawlee for static HTML extraction.
  *
- * Visits every page on a client site, extracts raw SEO signals, and persists
- * the results to Supabase (crawl_results table) so downstream components work
- * from a complete before-snapshot.
- *
- * Framework: Crawlee
- *   PlaywrightCrawler — Shopify (JS-rendered Liquid themes, SPAs)
- *   CheerioCrawler    — WordPress (faster, server-rendered HTML)
- *
- * Crawlee handles:
- *   - robots.txt compliance           - rate limiting
- *   - retry logic + exponential back-off  - URL deduplication
- *   - request queue management         - concurrency control
- *
- * Exports:
- *   crawl()            — main entry point
- *   crawlJobProcessor  — BullMQ job processor for vaeo:crawl queue
- *   extractPageData()  — pure HTML-to-struct extraction (exported for tests)
- *   shouldSkipUrl()    — URL filter predicate (exported for tests)
- *   SKIP_PATTERNS      — compiled regex array
- *   _injectOps()       — replace engine + store for unit tests
- *   _resetOps()        — restore defaults after each test
+ * Design rules:
+ *   - Never throws — always returns CrawlSiteResult
+ *   - Supabase is lazy-initialized via dynamic import of getConfig()
+ *   - Crawler fn is injectable for unit tests (_injectCrawler)
+ *   - Supabase client is injectable for unit tests (_injectSupabase)
  */
 
-import { load } from 'cheerio';
-import type { Job } from 'bullmq';
-import type { CmsType } from '../../core/types.js';
-import type { VaeoJob } from '../../queue/src/index.js';
-import { createLogger } from '../../action-log/src/index.js';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
-// Crawlee is a peer dependency — imported statically so TypeScript resolves types.
-// The real crawler is only invoked when no runCrawler override is injected,
-// so tests never launch a browser.
-import { PlaywrightCrawler, CheerioCrawler } from 'crawlee';
+// ── Types ─────────────────────────────────────────────────────────────────────
 
-// ── Skip patterns ─────────────────────────────────────────────────────────────
-
-/**
- * URL patterns that must never be enqueued or crawled.
- * Matches Shopify account/auth flows, cart/checkout, CDN asset paths,
- * and static file extensions.
- */
-export const SKIP_PATTERNS: RegExp[] = [
-  /\/customer_authentication/,
-  /\/account(\/|$|\?|#)/,
-  /\/password(\/|$|\?|#)/,
-  /\/cart(\/|$|\?|#)/,
-  /\/checkout(\/|$|\?|#)/,
-  /\/cdn\//,
-  /\.js(\?|#|$)/,
-  /\.css(\?|#|$)/,
-  /\.woff2?(\?|#|$)/,
-];
-
-/** Returns true if the URL matches any SKIP_PATTERN and should not be crawled. */
-export function shouldSkipUrl(url: string): boolean {
-  return SKIP_PATTERNS.some((p) => p.test(url));
+export interface ImageResult {
+  src:    string;
+  alt:    string | null;
+  width:  number | null;
+  height: number | null;
 }
 
-// ── Data types ────────────────────────────────────────────────────────────────
-
-export interface ImageRef {
-  src:     string;
-  alt:     string;
-  width:   string | null;
-  height:  string | null;
-  /** Filled by image detector (C14) — null during crawl. */
-  size_kb: null;
-}
-
-export interface LinkRef {
-  href:        string;
-  anchor_text: string;
-  /** null during crawl — can be joined from crawl_results by URL later. */
-  status_code: number | null;
-}
-
-/** Full per-URL payload written to Supabase crawl_results. */
-export interface CrawlPageData {
-  run_id:         string;
-  tenant_id:      string;
-  site_id:        string;
+export interface CrawlResult {
   url:            string;
-  status_code:    number | null;
+  status_code:    number;
   title:          string | null;
   meta_desc:      string | null;
   h1:             string[];
   h2:             string[];
-  images:         ImageRef[];
-  internal_links: LinkRef[];
+  images:         ImageResult[];
+  internal_links: string[];
   schema_blocks:  string[];
   canonical:      string | null;
   redirect_chain: string[];
-  load_time_ms:   number | null;
+  load_time_ms:   number;
 }
 
-export interface CrawlOptions {
-  run_id:       string;
-  tenant_id:    string;
-  site_id:      string;
-  cms:          CmsType;
-  /** Homepage URL to start crawling from. */
-  start_url:    string;
-  /** Maximum pages to visit. Default: 2000. */
-  max_urls?:    number;
-  /** Maximum link depth from start_url. Default: 3. */
-  max_depth?:   number;
-  /** Target requests per second per domain. Default: 1. */
-  req_per_sec?: number;
+export interface CrawlSiteRequest {
+  run_id:    string;
+  tenant_id: string;
+  site_id:   string;
+  site_url:  string;
+  max_urls?: number;
+  depth?:    number;
 }
 
-export interface CrawlResult {
+export interface CrawlSiteResult {
   run_id:       string;
   tenant_id:    string;
   site_id:      string;
   urls_crawled: number;
-  urls_failed:  number;
-  duration_ms:  number;
-  stored_at:    string;
+  results:      CrawlResult[];
+  status:       'completed' | 'failed' | 'partial';
+  error?:       string;
 }
 
-/** Raw page data produced by the crawl engine before field extraction. */
-export interface RawPage {
-  url:            string;
-  html:           string;
-  status_code:    number;
-  load_time_ms:   number;
-  redirect_chain: string[];
+// ── Injectable dependencies ───────────────────────────────────────────────────
+
+type CrawlerFn = (opts: {
+  startUrl: string;
+  maxUrls:  number;
+  maxDepth: number;
+}) => Promise<CrawlResult[]>;
+
+let _crawlerFn: CrawlerFn | undefined;
+/** undefined = not yet attempted | null = failed (degraded mode) */
+let _supabaseClient: SupabaseClient | null | undefined;
+
+/** Replace the crawlee engine. Pass undefined to restore the default. */
+export function _injectCrawler(fn: CrawlerFn): void {
+  _crawlerFn = fn;
 }
 
-/** Context passed to extractPageData() alongside the raw HTML. */
-export interface ExtractOpts {
-  run_id:         string;
-  tenant_id:      string;
-  site_id:        string;
-  /** Hostname of start_url, used to classify links as internal. */
-  start_domain:   string;
-  status_code:    number;
-  load_time_ms:   number;
-  redirect_chain: string[];
+/** Inject a Supabase client (or null to skip DB writes). */
+export function _injectSupabase(client: SupabaseClient | null): void {
+  _supabaseClient = client;
 }
 
-// ── Pure extraction ───────────────────────────────────────────────────────────
-
-/**
- * Pure function: parses raw HTML and extracts all SEO-relevant fields.
- *
- * No I/O, no side effects. Exported so unit tests can call it directly
- * with fixture HTML strings without running a real crawl.
- *
- * Internal link classification:
- *   - href starts with "/"               → internal (relative path)
- *   - href contains start_domain         → internal (absolute same-domain)
- *   - everything else                    → external, excluded
- */
-export function extractPageData(
-  html:   string,
-  url:    string,
-  opts:   ExtractOpts,
-): CrawlPageData {
-  const $ = load(html);
-
-  // ── Title ──────────────────────────────────────────────────────────────────
-  const title = $('title').first().text().trim() || null;
-
-  // ── Meta description ───────────────────────────────────────────────────────
-  const meta_desc =
-    $('meta[name="description"]').first().attr('content')?.trim() ?? null;
-
-  // ── Headings ───────────────────────────────────────────────────────────────
-  const h1 = $('h1')
-    .map((_, el) => $(el).text().trim())
-    .get()
-    .filter(Boolean);
-
-  const h2 = $('h2')
-    .map((_, el) => $(el).text().trim())
-    .get()
-    .filter(Boolean);
-
-  // ── Images ─────────────────────────────────────────────────────────────────
-  const images: ImageRef[] = $('img')
-    .map((_, el) => ({
-      src:     $(el).attr('src')    ?? '',
-      alt:     $(el).attr('alt')    ?? '',
-      width:   $(el).attr('width')  ?? null,
-      height:  $(el).attr('height') ?? null,
-      size_kb: null,
-    }))
-    .get();
-
-  // ── JSON-LD schema blocks ──────────────────────────────────────────────────
-  const schema_blocks: string[] = $('script[type="application/ld+json"]')
-    .map((_, el) => $(el).html() ?? '')
-    .get()
-    .filter(Boolean);
-
-  // ── Canonical ──────────────────────────────────────────────────────────────
-  const canonical =
-    $('link[rel="canonical"]').first().attr('href')?.trim() ?? null;
-
-  // ── Internal links ─────────────────────────────────────────────────────────
-  const internal_links: LinkRef[] = [];
-  $('a[href]').each((_, el) => {
-    const href = $(el).attr('href') ?? '';
-    if (
-      !href ||
-      href.startsWith('#') ||
-      href.startsWith('mailto:') ||
-      href.startsWith('tel:') ||
-      href.startsWith('javascript:')
-    ) return;
-
-    const isInternal =
-      href.startsWith('/') ||
-      href.includes(opts.start_domain);
-
-    if (isInternal) {
-      internal_links.push({
-        href,
-        anchor_text: $(el).text().trim(),
-        status_code: null,
-      });
-    }
-  });
-
-  return {
-    run_id:         opts.run_id,
-    tenant_id:      opts.tenant_id,
-    site_id:        opts.site_id,
-    url,
-    status_code:    opts.status_code,
-    title,
-    meta_desc,
-    h1,
-    h2,
-    images,
-    internal_links,
-    schema_blocks,
-    canonical,
-    redirect_chain: opts.redirect_chain,
-    load_time_ms:   opts.load_time_ms,
-  };
+/** Reset both injections — call in afterEach to isolate tests. */
+export function _resetInjections(): void {
+  _crawlerFn = undefined;
+  _supabaseClient = undefined;
 }
 
-// ── Supabase storage ──────────────────────────────────────────────────────────
-
-type SupabaseClient = Awaited<
-  ReturnType<typeof import('@supabase/supabase-js')['createClient']>
->;
-
-/** undefined = not yet attempted | null = failed / degraded mode */
-let _supabase: SupabaseClient | undefined | null;
+// ── Supabase lazy init ────────────────────────────────────────────────────────
 
 async function getSupabase(): Promise<SupabaseClient | null> {
-  if (_supabase !== undefined) return _supabase;
+  if (_supabaseClient !== undefined) return _supabaseClient;
   try {
     const [{ createClient }, { getConfig }] = await Promise.all([
       import('@supabase/supabase-js'),
-      import('../../core/config.js'),
+      import('../../core/src/config.js'),
     ]);
     const cfg = getConfig();
-    _supabase = createClient(cfg.supabaseUrl, cfg.supabaseServiceKey);
-    return _supabase;
+    _supabaseClient = createClient(cfg.supabaseUrl, cfg.supabaseServiceKey);
+    return _supabaseClient;
   } catch (err) {
-    process.stderr.write(
-      `[crawler] Supabase init failed — results not stored: ${String(err)}\n`,
-    );
-    _supabase = null;
+    process.stderr.write(`[crawler] supabase:error — init failed: ${String(err)}\n`);
+    _supabaseClient = null;
     return null;
   }
 }
 
-async function defaultStoreResult(data: CrawlPageData): Promise<void> {
-  const client = await getSupabase();
-  if (!client) return;
+// ── Supabase write ────────────────────────────────────────────────────────────
 
-  const { error } = await client.from('crawl_results').insert({
-    run_id:         data.run_id,
-    tenant_id:      data.tenant_id,
-    site_id:        data.site_id,
-    url:            data.url,
-    status_code:    data.status_code   ?? null,
-    title:          data.title         ?? null,
-    meta_desc:      data.meta_desc     ?? null,
-    h1:             data.h1,
-    h2:             data.h2,
-    images:         data.images,
-    internal_links: data.internal_links,
-    schema_blocks:  data.schema_blocks,
-    canonical:      data.canonical     ?? null,
-    redirect_chain: data.redirect_chain,
-    load_time_ms:   data.load_time_ms  ?? null,
-  });
-
-  if (error) {
-    process.stderr.write(
-      `[crawler] Supabase insert failed (${data.url}): ${error.message}\n`,
-    );
+async function writeResultsToSupabase(
+  client: SupabaseClient,
+  req: CrawlSiteRequest,
+  results: CrawlResult[],
+): Promise<void> {
+  const now = new Date().toISOString();
+  for (const r of results) {
+    try {
+      const { error } = await client.from('crawl_results').insert({
+        run_id:         req.run_id,
+        tenant_id:      req.tenant_id,
+        site_id:        req.site_id,
+        url:            r.url,
+        status_code:    r.status_code,
+        title:          r.title,
+        meta_desc:      r.meta_desc,
+        h1:             r.h1,
+        h2:             r.h2,
+        images:         r.images,
+        internal_links: r.internal_links,
+        schema_blocks:  r.schema_blocks,
+        canonical:      r.canonical,
+        redirect_chain: r.redirect_chain,
+        load_time_ms:   r.load_time_ms,
+        crawled_at:     now,
+      });
+      if (error) {
+        process.stderr.write(`[crawler] supabase:error — ${r.url}: ${error.message}\n`);
+      }
+    } catch (err) {
+      process.stderr.write(`[crawler] supabase:error — ${r.url}: ${String(err)}\n`);
+    }
   }
 }
 
-// ── Injectable ops (for unit tests) ──────────────────────────────────────────
+// ── Real crawler implementation ───────────────────────────────────────────────
 
-export interface CrawlerOps {
-  /**
-   * Replace the Crawlee engine.
-   * The function receives fully-resolved options plus two callbacks:
-   *   onPage  — call for each successfully crawled page
-   *   onFail  — call for each permanently failed URL
-   */
-  runCrawler: (
-    opts:   Required<CrawlOptions>,
-    onPage: (raw: RawPage) => Promise<void>,
-    onFail: (url: string, err: Error) => Promise<void>,
-  ) => Promise<void>;
+async function runRealCrawler(opts: {
+  startUrl: string;
+  maxUrls:  number;
+  maxDepth: number;
+}): Promise<CrawlResult[]> {
+  const { CheerioCrawler } = await import('crawlee');
+  const results: CrawlResult[] = [];
 
-  /** Replace Supabase insert — receives fully assembled CrawlPageData. */
-  storeResult: (data: CrawlPageData) => Promise<void>;
+  let baseOrigin: string;
+  try {
+    baseOrigin = new URL(opts.startUrl).origin;
+  } catch {
+    baseOrigin = opts.startUrl;
+  }
+
+  const crawler = new CheerioCrawler({
+    maxRequestsPerCrawl:      opts.maxUrls,
+    maxCrawlDepth:            opts.maxDepth,
+    maxConcurrency:           1,
+    requestHandlerTimeoutSecs: 30,
+
+    async requestHandler({ $, request, response, enqueueLinks }) {
+      const start = Date.now();
+      const url   = request.loadedUrl ?? request.url;
+
+      const title     = $('title').first().text().trim() || null;
+      const meta_desc = $('meta[name="description"]').attr('content')?.trim() ?? null;
+      const canonical = $('link[rel="canonical"]').attr('href')?.trim() ?? null;
+
+      const h1 = $('h1').map((_i, el) => $(el).text().trim()).get().filter(Boolean);
+      const h2 = $('h2').map((_i, el) => $(el).text().trim()).get().filter(Boolean);
+
+      const images: ImageResult[] = $('img').map((_i, el) => {
+        const src = $(el).attr('src') ?? '';
+        if (!src) return null;
+        const w = $(el).attr('width');
+        const h = $(el).attr('height');
+        return {
+          src,
+          alt:    $(el).attr('alt') ?? null,
+          width:  w != null ? parseInt(w, 10) : null,
+          height: h != null ? parseInt(h, 10) : null,
+        };
+      }).get().filter(Boolean) as ImageResult[];
+
+      const linkSet = new Set<string>();
+      $('a[href]').each((_i, el) => {
+        const href = $(el).attr('href') ?? '';
+        try {
+          const resolved = new URL(href, url);
+          if (resolved.origin === baseOrigin) linkSet.add(resolved.href);
+        } catch { /* skip malformed */ }
+      });
+
+      const schema_blocks: string[] = $('script[type="application/ld+json"]')
+        .map((_i, el) => $(el).html() ?? '')
+        .get()
+        .filter(Boolean);
+
+      results.push({
+        url,
+        status_code:    response.statusCode ?? 200,
+        title,
+        meta_desc,
+        h1,
+        h2,
+        images,
+        internal_links: [...linkSet],
+        schema_blocks,
+        canonical,
+        redirect_chain: [],
+        load_time_ms:   Date.now() - start,
+      });
+
+      await enqueueLinks({ strategy: 'same-origin' });
+    },
+
+    async failedRequestHandler({ request }) {
+      results.push({
+        url:            request.url,
+        status_code:    0,
+        title:          null,
+        meta_desc:      null,
+        h1:             [],
+        h2:             [],
+        images:         [],
+        internal_links: [],
+        schema_blocks:  [],
+        canonical:      null,
+        redirect_chain: [],
+        load_time_ms:   0,
+      });
+    },
+  });
+
+  await crawler.run([opts.startUrl]);
+  return results;
 }
 
-let _ops: Partial<CrawlerOps> | null = null;
+// ── Main export ───────────────────────────────────────────────────────────────
 
 /**
- * Overrides the Crawlee engine and/or Supabase store for unit testing.
- * Always call _resetOps() in afterEach.
+ * Crawls a site and returns structured SEO data for every page found.
+ * Persists results to Supabase crawl_results table (non-blocking on failure).
+ * Never throws — always returns CrawlSiteResult.
  */
-export function _injectOps(ops: Partial<CrawlerOps>): void {
-  _ops = ops;
-}
-
-/** Restores real Crawlee + Supabase implementations. */
-export function _resetOps(): void {
-  _ops = null;
-}
-
-// ── Real Crawlee engine ───────────────────────────────────────────────────────
-
-async function runRealCrawler(
-  opts:   Required<CrawlOptions>,
-  onPage: (raw: RawPage) => Promise<void>,
-  onFail: (url: string, err: Error) => Promise<void>,
-): Promise<void> {
-  const { cms, start_url, max_urls, max_depth, req_per_sec } = opts;
-
-  // maxRequestsPerMinute translates req_per_sec to Crawlee's rate-limit option.
-  const maxRequestsPerMinute = req_per_sec * 60;
-
-  const baseOpts = {
-    maxRequestsPerCrawl:  max_urls,
-    maxRequestRetries:    3,
-    maxConcurrency:       1,
-    maxRequestsPerMinute,
-  };
-
-  /** Enqueue depth-aware, skip-filtered links from the current page. */
-  function makeTransform(depth: number) {
-    return (req: { url: string; userData?: Record<string, unknown> }) => {
-      if (shouldSkipUrl(req.url)) return false as const;
-      if (depth >= max_depth)     return false as const;
-      req.userData = { ...req.userData, depth: depth + 1 };
-      return req;
+export async function crawlSite(request: CrawlSiteRequest): Promise<CrawlSiteResult> {
+  // Validate URL early
+  let startUrl: string;
+  try {
+    startUrl = new URL(request.site_url ?? '').href;
+  } catch {
+    return {
+      run_id:       request.run_id,
+      tenant_id:    request.tenant_id,
+      site_id:      request.site_id,
+      urls_crawled: 0,
+      results:      [],
+      status:       'failed',
+      error:        `Invalid site_url: "${String(request.site_url)}"`,
     };
   }
 
-  if (cms === 'shopify') {
-    const crawler = new PlaywrightCrawler({
-      ...baseOpts,
-      async requestHandler({ page, request, response, enqueueLinks }) {
-        const t0   = Date.now();
-        const html = await page.content();
+  const maxUrls = request.max_urls ?? 2000;
+  const depth   = request.depth    ?? 3;
 
-        await onPage({
-          url:            request.loadedUrl ?? request.url,
-          html,
-          status_code:    response?.status() ?? 200,
-          load_time_ms:   Date.now() - t0,
-          redirect_chain: [],
-        });
+  process.stderr.write(`[crawler] crawl:start — ${startUrl}, max_urls=${maxUrls}\n`);
 
-        const depth = (request.userData['depth'] as number) ?? 0;
-        await enqueueLinks({
-          strategy:                'same-hostname',
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          transformRequestFunction: makeTransform(depth) as any,
-        });
-      },
-      async failedRequestHandler({ request, error }) {
-        await onFail(request.url, error as Error);
-      },
-    });
-
-    await crawler.run([{ url: start_url, userData: { depth: 0 } }]);
-
-  } else {
-    // WordPress — faster CheerioCrawler (no browser)
-    const crawler = new CheerioCrawler({
-      ...baseOpts,
-      async requestHandler({ $, request, response, enqueueLinks }) {
-        const t0   = Date.now();
-        const html = $.html();
-
-        await onPage({
-          url:            request.loadedUrl ?? request.url,
-          html,
-          status_code:    (response as unknown as { statusCode?: number }).statusCode ?? 200,
-          load_time_ms:   Date.now() - t0,
-          redirect_chain: [],
-        });
-
-        const depth = (request.userData['depth'] as number) ?? 0;
-        await enqueueLinks({
-          strategy:                'same-hostname',
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          transformRequestFunction: makeTransform(depth) as any,
-        });
-      },
-      async failedRequestHandler({ request, error }) {
-        await onFail(request.url, error as Error);
-      },
-    });
-
-    await crawler.run([{ url: start_url, userData: { depth: 0 } }]);
-  }
-}
-
-// ── crawl ─────────────────────────────────────────────────────────────────────
-
-/**
- * Crawls a site from start_url, extracts per-page SEO fields, and stores
- * results to Supabase.
- *
- * ActionLog events emitted:
- *   crawl:start        — once at the beginning (status=pending)
- *   crawl:url_complete — every 50 pages (status=ok)
- *   crawl:url_failed   — per permanently-failed URL (status=failed)
- *   crawl:complete     — once at the end (status=ok, includes counts)
- *
- * @param opts  Crawl options (run context + site config + tuning).
- * @returns     Summary of the crawl run.
- */
-export async function crawl(opts: CrawlOptions): Promise<CrawlResult> {
-  const {
-    run_id, tenant_id, site_id, cms,
-    start_url,
-    max_urls    = 2000,
-    max_depth   = 3,
-    req_per_sec = 1,
-  } = opts;
-
-  const resolvedOpts: Required<CrawlOptions> = {
-    run_id, tenant_id, site_id, cms,
-    start_url, max_urls, max_depth, req_per_sec,
-  };
-
-  const startedAt    = Date.now();
-  const start_domain = new URL(start_url).hostname;
-  const log = createLogger({ run_id, tenant_id, site_id, cms, command: 'crawl' });
-
-  const storeResult = _ops?.storeResult ?? defaultStoreResult;
-  const runCrawler  = _ops?.runCrawler  ?? runRealCrawler;
-
-  let urlsCrawled = 0;
-  let urlsFailed  = 0;
-
-  log({
-    stage:    'crawl:start',
-    status:   'pending',
-    metadata: { start_url, max_urls, max_depth, cms },
-  });
-
-  async function onPage(raw: RawPage): Promise<void> {
-    const data = extractPageData(raw.html, raw.url, {
-      run_id, tenant_id, site_id,
-      start_domain,
-      status_code:    raw.status_code,
-      load_time_ms:   raw.load_time_ms,
-      redirect_chain: raw.redirect_chain,
-    });
-    await storeResult(data);
-    urlsCrawled++;
-
-    if (urlsCrawled % 50 === 0) {
-      log({
-        stage:    'crawl:url_complete',
-        status:   'ok',
-        url:      raw.url,
-        metadata: { count: urlsCrawled },
-      });
-    }
+  // Run crawler
+  let results: CrawlResult[];
+  try {
+    const fn = _crawlerFn ?? runRealCrawler;
+    results = await fn({ startUrl, maxUrls, maxDepth: depth });
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`[crawler] crawl:error — ${error}\n`);
+    return {
+      run_id:       request.run_id,
+      tenant_id:    request.tenant_id,
+      site_id:      request.site_id,
+      urls_crawled: 0,
+      results:      [],
+      status:       'failed',
+      error,
+    };
   }
 
-  async function onFail(url: string, error: Error): Promise<void> {
-    urlsFailed++;
-    log({
-      stage:  'crawl:url_failed',
-      status: 'failed',
-      url,
-      error:  error.message,
-    });
+  // Persist to Supabase — non-blocking, never fails the crawl
+  try {
+    const client = await getSupabase();
+    if (client) await writeResultsToSupabase(client, request, results);
+  } catch (err) {
+    process.stderr.write(`[crawler] supabase:error — ${String(err)}\n`);
   }
 
-  await runCrawler(resolvedOpts, onPage, onFail);
+  // Derive status
+  const failedCount = results.filter(r => r.status_code === 0 || r.status_code >= 400).length;
+  const status: 'completed' | 'failed' | 'partial' =
+    results.length === 0 ? 'failed'    :
+    failedCount    === 0 ? 'completed' :
+                           'partial';
 
-  const storedAt   = new Date().toISOString();
-  const durationMs = Date.now() - startedAt;
-
-  log({
-    stage:       'crawl:complete',
-    status:      'ok',
-    duration_ms: durationMs,
-    metadata:    { urls_crawled: urlsCrawled, urls_failed: urlsFailed },
-  });
+  process.stderr.write(`[crawler] crawl:complete — urls_crawled=${results.length}, status=${status}\n`);
 
   return {
-    run_id,
-    tenant_id,
-    site_id,
-    urls_crawled: urlsCrawled,
-    urls_failed:  urlsFailed,
-    duration_ms:  durationMs,
-    stored_at:    storedAt,
+    run_id:       request.run_id,
+    tenant_id:    request.tenant_id,
+    site_id:      request.site_id,
+    urls_crawled: results.length,
+    results,
+    status,
   };
-}
-
-// ── BullMQ job processor ──────────────────────────────────────────────────────
-
-/**
- * BullMQ job processor for the vaeo:crawl queue.
- *
- * Usage:
- *   import { createWorker, QUEUES } from '@vaeo/queue';
- *   import { crawlJobProcessor } from '@vaeo/crawler';
- *   createWorker(QUEUES.CRAWL, crawlJobProcessor);
- *
- * VaeoJob.payload must contain:
- *   start_url:    string   (required)
- *   max_urls?:    number
- *   max_depth?:   number
- *   req_per_sec?: number
- */
-export async function crawlJobProcessor(
-  job: Job<VaeoJob>,
-): Promise<CrawlResult> {
-  const { run_id, tenant_id, site_id, cms, payload } = job.data;
-  return crawl({
-    run_id,
-    tenant_id,
-    site_id,
-    cms,
-    start_url:   payload['start_url']   as string,
-    max_urls:    payload['max_urls']    as number | undefined,
-    max_depth:   payload['max_depth']   as number | undefined,
-    req_per_sec: payload['req_per_sec'] as number | undefined,
-  });
 }
