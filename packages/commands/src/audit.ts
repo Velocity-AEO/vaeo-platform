@@ -26,10 +26,11 @@ import { createLogger } from '../../action-log/src/index.js';
 // ── Protected route filter ────────────────────────────────────────────────────
 
 /**
- * Shopify system paths that should never appear in the audit queue.
- * These are framework-managed routes that operators cannot meaningfully fix.
+ * Shopify system paths where no writable CMS resource exists.
+ * These are framework-managed routes (auth, cart, checkout) that operators
+ * cannot meaningfully fix via the Shopify Admin API.
  */
-const SHOPIFY_PROTECTED_PATHS = [
+const SHOPIFY_SYSTEM_PATHS = [
   '/account',
   '/cart',
   '/checkout',
@@ -44,12 +45,42 @@ const SHOPIFY_PROTECTED_PATHS = [
   '/customer_authentication/redirect',
 ];
 
+/**
+ * WordPress system paths where no writable CMS resource exists.
+ * These are framework-managed routes (admin UI, cron, XML-RPC, feeds)
+ * that are never user-facing content pages.
+ */
+const WORDPRESS_SYSTEM_PATHS = [
+  '/wp-admin',
+  '/wp-login.php',
+  '/wp-cron.php',
+  '/xmlrpc.php',
+  '/feed',
+];
+
+/**
+ * Returns true for URLs where no writable CMS resource exists (system routes,
+ * auth pages) OR where the page is intentionally excluded from indexing.
+ * VAEO never attempts fixes on these.
+ */
 function isProtectedRoute(url: string): boolean {
   try {
-    const path = new URL(url).pathname;
-    return SHOPIFY_PROTECTED_PATHS.some(
-      (p) => path === p || path.startsWith(p + '/'),
-    );
+    const parsed = new URL(url);
+    const path   = parsed.pathname;
+
+    // Shopify system paths — prefix match (e.g. /account/addresses → blocked)
+    if (SHOPIFY_SYSTEM_PATHS.some((p) => path === p || path.startsWith(p + '/'))) return true;
+
+    // WordPress system paths — prefix match (e.g. /wp-admin/options.php → blocked)
+    if (WORDPRESS_SYSTEM_PATHS.some((p) => path === p || path.startsWith(p + '/'))) return true;
+
+    // WordPress: /wp-json base only — REST API root; subpaths are data endpoints, not pages
+    if (path === '/wp-json') return true;
+
+    // WordPress: feed query param variant (/?feed=rss, /?feed=rss2, etc.)
+    if (parsed.searchParams.has('feed')) return true;
+
+    return false;
   } catch {
     return false;
   }
@@ -258,6 +289,14 @@ export async function runAudit(
       return failed(request, `No crawl_results found for run_id=${request.run_id}`);
     }
 
+    // Build noindex URL set — used in Step 5 to skip issues on intentionally
+    // noindexed pages (robots_meta contains 'noindex' from <meta> or X-Robots-Tag).
+    const noindexUrls = new Set<string>(
+      rows
+        .filter((r) => r.robots_meta?.toLowerCase().includes('noindex'))
+        .map((r) => r.url),
+    );
+
     // ── Step 2: Detect issues ─────────────────────────────────────────────────
 
     const ctx: DetectorCtx = {
@@ -286,15 +325,22 @@ export async function runAudit(
       return b.issue.risk_score - a.issue.risk_score;
     });
 
-    // ── Step 5: Filter protected routes, then build action_queue rows ─────────
+    // ── Step 5: Filter protected routes + noindex, then build action_queue rows ─
 
-    const skipped = withPriority.filter(({ issue }) => isProtectedRoute(issue.url));
-    if (skipped.length > 0) {
-      const paths = Array.from(new Set(skipped.map(({ issue }) => new URL(issue.url).pathname)));
-      console.log(`[audit] Skipping ${skipped.length} issues on protected routes:`, paths);
+    const protectedSkipped = withPriority.filter(({ issue }) => isProtectedRoute(issue.url));
+    if (protectedSkipped.length > 0) {
+      const paths = Array.from(new Set(protectedSkipped.map(({ issue }) => new URL(issue.url).pathname)));
+      console.log(`[audit] Skipping ${protectedSkipped.length} issues on protected routes:`, paths);
     }
 
-    const queueReady = withPriority.filter(({ issue }) => !isProtectedRoute(issue.url));
+    const afterProtected = withPriority.filter(({ issue }) => !isProtectedRoute(issue.url));
+
+    const noindexSkipped = afterProtected.filter(({ issue }) => noindexUrls.has(issue.url));
+    if (noindexSkipped.length > 0) {
+      console.log(`[audit] Skipping ${noindexSkipped.length} noindex URLs`);
+    }
+
+    const queueReady = afterProtected.filter(({ issue }) => !noindexUrls.has(issue.url));
 
     const queueRows: ActionQueueRow[] = queueReady.map(({ issue, issueCategory, priority }) => {
       // Base proposed_fix — all issue types get category + auto_deploy stamped on.

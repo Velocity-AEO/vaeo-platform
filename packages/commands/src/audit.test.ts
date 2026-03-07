@@ -49,6 +49,7 @@ function makeCrawlRow(url = 'https://example.com/'): CrawlResultRow {
     canonical:      null,
     redirect_chain: null,
     load_time_ms:   null,
+    robots_meta:    null,
   };
 }
 
@@ -563,5 +564,122 @@ describe('runAudit — extended protected paths (/customer_authentication)', () 
       writeQueue:    async (rows) => { captured = rows; return rows.length; },
     }));
     assert.equal(captured.length, 1, 'Expected /pages/about-us to pass through');
+  });
+});
+
+// ── runAudit — WordPress system paths ────────────────────────────────────────
+
+describe('runAudit — WordPress system paths are filtered', () => {
+  function makeIssueAt(url: string): ScoredIssue {
+    return makeScoredIssue({ url, issue_type: 'META_TITLE_MISSING' });
+  }
+
+  it('filters /wp-admin URLs', async () => {
+    let captured: ActionQueueRow[] = [];
+    const issue = makeIssueAt('https://example.com/wp-admin/options.php');
+    await runAudit(baseReq(), happy({
+      detectIssues:  () => [issue as unknown as DetectedIssue],
+      scoreIssues:   () => [issue],
+      writeQueue:    async (rows) => { captured = rows; return rows.length; },
+    }));
+    assert.equal(captured.length, 0, 'Expected no rows — /wp-admin is protected');
+  });
+
+  it('filters /wp-login.php URLs', async () => {
+    let captured: ActionQueueRow[] = [];
+    const issue = makeIssueAt('https://example.com/wp-login.php');
+    await runAudit(baseReq(), happy({
+      detectIssues:  () => [issue as unknown as DetectedIssue],
+      scoreIssues:   () => [issue],
+      writeQueue:    async (rows) => { captured = rows; return rows.length; },
+    }));
+    assert.equal(captured.length, 0, 'Expected no rows — /wp-login.php is protected');
+  });
+
+  it('filters /wp-json base path (exact match only)', async () => {
+    let captured: ActionQueueRow[] = [];
+    const issue = makeIssueAt('https://example.com/wp-json');
+    await runAudit(baseReq(), happy({
+      detectIssues:  () => [issue as unknown as DetectedIssue],
+      scoreIssues:   () => [issue],
+      writeQueue:    async (rows) => { captured = rows; return rows.length; },
+    }));
+    assert.equal(captured.length, 0, 'Expected no rows — /wp-json base is protected');
+  });
+
+  it('does NOT filter /wp-json subpaths (base only per spec)', async () => {
+    let captured: ActionQueueRow[] = [];
+    const issue = makeIssueAt('https://example.com/wp-json/wp/v2/posts');
+    await runAudit(baseReq(), happy({
+      detectIssues:  () => [issue as unknown as DetectedIssue],
+      scoreIssues:   () => [issue],
+      writeQueue:    async (rows) => { captured = rows; return rows.length; },
+    }));
+    assert.equal(captured.length, 1, 'Expected /wp-json subpaths to pass through');
+  });
+
+  it('filters /?feed= query param URLs', async () => {
+    let captured: ActionQueueRow[] = [];
+    const issue = makeIssueAt('https://example.com/?feed=rss2');
+    await runAudit(baseReq(), happy({
+      detectIssues:  () => [issue as unknown as DetectedIssue],
+      scoreIssues:   () => [issue],
+      writeQueue:    async (rows) => { captured = rows; return rows.length; },
+    }));
+    assert.equal(captured.length, 0, 'Expected no rows — /?feed= is protected');
+  });
+});
+
+// ── runAudit — noindex filter ─────────────────────────────────────────────────
+
+describe('runAudit — noindex filter excludes pages with robots_meta=noindex', () => {
+  const NOINDEX_URL = 'https://example.com/thank-you';
+
+  it('excludes issues whose URL has robots_meta containing "noindex"', async () => {
+    let captured: ActionQueueRow[] = [];
+    const issue = makeScoredIssue({ url: NOINDEX_URL, issue_type: 'META_TITLE_MISSING' });
+    await runAudit(baseReq(), happy({
+      loadCrawlRows: async () => [{ ...makeCrawlRow(NOINDEX_URL), robots_meta: 'noindex,nofollow' }],
+      detectIssues:  () => [issue as unknown as DetectedIssue],
+      scoreIssues:   () => [issue],
+      writeQueue:    async (rows) => { captured = rows; return rows.length; },
+    }));
+    assert.equal(captured.length, 0, 'Expected no rows — URL is noindexed');
+  });
+
+  it('passes through issues on indexable pages (robots_meta=null)', async () => {
+    let captured: ActionQueueRow[] = [];
+    const issue = makeScoredIssue({ url: NOINDEX_URL, issue_type: 'META_TITLE_MISSING' });
+    await runAudit(baseReq(), happy({
+      loadCrawlRows: async () => [{ ...makeCrawlRow(NOINDEX_URL), robots_meta: null }],
+      detectIssues:  () => [issue as unknown as DetectedIssue],
+      scoreIssues:   () => [issue],
+      writeQueue:    async (rows) => { captured = rows; return rows.length; },
+    }));
+    assert.equal(captured.length, 1, 'Expected row to pass through — robots_meta=null means indexable');
+  });
+
+  it('passes through issues when robots_meta does not contain noindex', async () => {
+    let captured: ActionQueueRow[] = [];
+    const issue = makeScoredIssue({ url: NOINDEX_URL, issue_type: 'META_TITLE_MISSING' });
+    await runAudit(baseReq(), happy({
+      loadCrawlRows: async () => [{ ...makeCrawlRow(NOINDEX_URL), robots_meta: 'index,follow' }],
+      detectIssues:  () => [issue as unknown as DetectedIssue],
+      scoreIssues:   () => [issue],
+      writeQueue:    async (rows) => { captured = rows; return rows.length; },
+    }));
+    assert.equal(captured.length, 1, 'Expected row to pass through — robots_meta=index,follow is indexable');
+  });
+
+  it('is case-insensitive for noindex check', async () => {
+    let captured: ActionQueueRow[] = [];
+    const issue = makeScoredIssue({ url: NOINDEX_URL, issue_type: 'META_TITLE_MISSING' });
+    await runAudit(baseReq(), happy({
+      loadCrawlRows: async () => [{ ...makeCrawlRow(NOINDEX_URL), robots_meta: 'NOINDEX,FOLLOW' }],
+      detectIssues:  () => [issue as unknown as DetectedIssue],
+      scoreIssues:   () => [issue],
+      writeQueue:    async (rows) => { captured = rows; return rows.length; },
+    }));
+    assert.equal(captured.length, 0, 'Expected no rows — NOINDEX is case-insensitive match');
   });
 });

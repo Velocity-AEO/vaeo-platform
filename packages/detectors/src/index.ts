@@ -112,6 +112,10 @@ export interface CrawlResultRow {
   canonical:      string | null;
   redirect_chain: string[] | null;
   load_time_ms:   number | null;
+  /** Combined robots directive string, e.g. "noindex,nofollow" or "index,follow".
+   *  Populated from <meta name="robots"> content or X-Robots-Tag header.
+   *  null means no robots directive was found (treat as indexable). */
+  robots_meta:    string | null;
 }
 
 // ── Internal factory ──────────────────────────────────────────────────────────
