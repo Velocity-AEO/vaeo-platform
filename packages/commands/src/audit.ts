@@ -270,7 +270,8 @@ export async function runAudit(
         category:    issueCategory,
         auto_deploy: issue.auto_deploy,
       },
-      approval_required: issue.approval_required,
+      // §5.2: risk >= 4 always requires approval (MVP default; tenant config can loosen)
+      approval_required: issue.approval_required || issue.risk_score >= 4,
       execution_status:  'queued' as const,
     }));
 

@@ -6,7 +6,7 @@ import type { ActionQueueRow, CommandCenterRow, CommandCenterStats, DashboardSta
 export async function getDashboardStats(): Promise<DashboardStats> {
   const db = createServerClient();
   const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  today.setUTCHours(0, 0, 0, 0);   // UTC midnight — matches action_log.ts stored as UTC ISO
   const todayIso  = today.toISOString();
   const minus24h  = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
