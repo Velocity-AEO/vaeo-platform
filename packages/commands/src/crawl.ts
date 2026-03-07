@@ -94,9 +94,10 @@ async function realLookupSite(
   tenant_id: string,
 ): Promise<SiteLookup | null> {
   try {
-    const { config }       = await import('../../core/config.js');
+    const { getConfig }    = await import('../../core/config.js');
     const { createClient } = await import('@supabase/supabase-js');
-    const client = createClient(config.supabase.url, config.supabase.serviceRoleKey, {
+    const cfg    = getConfig();
+    const client = createClient(cfg.supabaseUrl, cfg.supabaseServiceKey, {
       auth: { persistSession: false },
     });
     const { data, error } = await client
@@ -113,9 +114,10 @@ async function realLookupSite(
 }
 
 async function realSaveSnapshot(args: SnapshotArgs): Promise<string> {
-  const { config }       = await import('../../core/config.js');
+  const { getConfig }    = await import('../../core/config.js');
   const { createClient } = await import('@supabase/supabase-js');
-  const client = createClient(config.supabase.url, config.supabase.serviceRoleKey, {
+  const cfg    = getConfig();
+  const client = createClient(cfg.supabaseUrl, cfg.supabaseServiceKey, {
     auth: { persistSession: false },
   });
   const { data, error } = await client

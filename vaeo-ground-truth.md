@@ -33,16 +33,16 @@ Repo: github.com/Velocity-AEO/vaeo-platform
 - [x] C22 — Playwright visual diff
 - [x] C23 — vaeo connect
 - [x] C24 — vaeo crawl
+- [x] C25 — vaeo audit
+- [x] C26 — vaeo optimize
+- [x] C27 — vaeo verify
+- [x] C28 — vaeo promote
+- [x] C29 — vaeo rollback
+- [x] C30 — Operator dashboard (Next.js 14, Supabase, 4 pages)
 
 ### In Progress
 
 ### Not Started
-- [ ] C25 — vaeo audit
-- [ ] C26 — vaeo optimize
-- [ ] C27 — vaeo verify
-- [ ] C28 — vaeo promote
-- [ ] C29 — vaeo rollback
-- [ ] C30 — Operator dashboard
 
 ## Repos
 - Platform: ~/vaeo-platform (github.com/Velocity-AEO/vaeo-platform)
@@ -60,3 +60,9 @@ Repo: github.com/Velocity-AEO/vaeo-platform
 - C22 Playwright visual diff — Claude Code — March 6 2026
 - C23 vaeo connect — Claude Code — March 6 2026
 - C24 vaeo crawl — Claude Code — March 6 2026
+- C25 vaeo audit — Claude Code — March 6 2026
+- C26 vaeo optimize — Claude Code — March 6 2026
+- C27 vaeo verify — Claude Code — March 6 2026
+- C28 vaeo promote — Claude Code — March 6 2026
+- C29 vaeo rollback — Claude Code — March 6 2026
+- C30 Operator dashboard — Claude Code — March 6 2026

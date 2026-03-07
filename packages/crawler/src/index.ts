@@ -259,14 +259,12 @@ let _supabase: SupabaseClient | undefined | null;
 async function getSupabase(): Promise<SupabaseClient | null> {
   if (_supabase !== undefined) return _supabase;
   try {
-    const [{ createClient }, { config }] = await Promise.all([
+    const [{ createClient }, { getConfig }] = await Promise.all([
       import('@supabase/supabase-js'),
       import('../../core/config.js'),
     ]);
-    _supabase = createClient(
-      config.supabase.url,
-      config.supabase.serviceRoleKey,
-    );
+    const cfg = getConfig();
+    _supabase = createClient(cfg.supabaseUrl, cfg.supabaseServiceKey);
     return _supabase;
   } catch (err) {
     process.stderr.write(

@@ -14,7 +14,7 @@
  *   - This module must never throw or crash the calling system.
  */
 
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import type { CmsType } from '../../core/types.js';
 
 // ── ActionLogEntry ────────────────────────────────────────────────────────────
@@ -80,9 +80,12 @@ let _client: SupabaseClient | null | undefined;
 async function getClient(): Promise<SupabaseClient | null> {
   if (_client !== undefined) return _client;
   try {
-    // Dynamic import so config errors never surface at module-load time.
-    // If env vars are missing, config.ts throws — we catch it here.
-    const { config } = await import('../../core/config.js');
+    // Dynamic imports so neither supabase-js nor config errors surface at
+    // module-load time — action-log must never crash the calling system.
+    const [{ createClient }, { config }] = await Promise.all([
+      import('@supabase/supabase-js'),
+      import('../../core/config.js'),
+    ]);
     _client = createClient(config.supabase.url, config.supabase.serviceRoleKey, {
       auth: { persistSession: false },
     });

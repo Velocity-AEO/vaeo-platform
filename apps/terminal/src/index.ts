@@ -22,6 +22,11 @@ import {
 } from '../../../packages/patch-engine/src/rollback-runner.js';
 import { runConnectCli } from '../../../packages/commands/src/connect.js';
 import { runCrawlCli }   from '../../../packages/commands/src/crawl.js';
+import { runAuditCli }    from '../../../packages/commands/src/audit.js';
+import { runOptimizeCli } from '../../../packages/commands/src/optimize.js';
+import { runVerifyCli }   from '../../../packages/commands/src/verify.js';
+import { runPromoteCli }   from '../../../packages/commands/src/promote.js';
+import { runRollbackCli } from '../../../packages/commands/src/rollback.js';
 
 // Type imports are referenced here so the file is the declared consumer of the
 // platform contracts. Implementations will import from packages/core/types.ts
@@ -82,52 +87,73 @@ program
 program
   .command('audit')
   .description('Run SEO detectors against a crawl and produce a ranked issue blueprint')
-  .option('--site <domain>', 'Site domain to audit')
-  .option('--run <id>', 'Run ID of an existing crawl to audit')
-  .action(() => {
-    console.log('[vaeo audit] not yet implemented');
+  .requiredOption('--run-id <id>',    'Run ID of the crawl snapshot to audit')
+  .requiredOption('--tenant-id <id>', 'Tenant UUID')
+  .requiredOption('--site-id <id>',   'Site UUID')
+  .requiredOption('--cms <type>',     'CMS target: shopify | wordpress')
+  .action(async (opts: { runId: string; tenantId: string; siteId: string; cms: string }) => {
+    await runAuditCli(opts);
   });
 
 // ── vaeo optimize ────────────────────────────────────────────────────────────
 
 program
   .command('optimize')
-  .description('Generate patch plans for all actionable issues in an audit blueprint')
-  .option('--site <domain>', 'Site domain')
-  .option('--run <id>', 'Run ID of the audit to optimize')
-  .option('--mode <mode>', 'Execution mode: preview | apply (default: preview)')
-  .action(() => {
-    console.log('[vaeo optimize] not yet implemented');
+  .description('Apply fixes in guardrail priority order, validate, and deploy or queue for approval')
+  .requiredOption('--run-id <id>',    'Run ID of the audit to optimize')
+  .requiredOption('--tenant-id <id>', 'Tenant UUID')
+  .requiredOption('--site-id <id>',   'Site UUID')
+  .option('--auto-approve-max-risk <n>', 'Max risk score for auto-deploy (default: 3)', parseInt)
+  .action(async (opts: { runId: string; tenantId: string; siteId: string; autoApproveMaxRisk?: number }) => {
+    await runOptimizeCli(opts);
   });
 
 // ── vaeo verify ──────────────────────────────────────────────────────────────
 
 program
   .command('verify')
-  .description('Fetch live or sandbox URLs and confirm patches are present in the DOM')
-  .option('--site <domain>', 'Site domain')
-  .option('--run <id>', 'Run ID of the patch set to verify')
-  .option('--sandbox', 'Verify against sandbox theme instead of live')
-  .action(() => {
-    console.log('[vaeo verify] not yet implemented');
+  .description('Re-run validators against deployed fixes to confirm nothing regressed post-deployment')
+  .requiredOption('--run-id <id>',    'Run ID of the deployed patch set to verify')
+  .requiredOption('--tenant-id <id>', 'Tenant UUID')
+  .requiredOption('--site-id <id>',   'Site UUID')
+  .action(async (opts: { runId: string; tenantId: string; siteId: string }) => {
+    await runVerifyCli(opts);
   });
 
 // ── vaeo promote ─────────────────────────────────────────────────────────────
 
 program
   .command('promote')
-  .description('Promote a verified sandbox to live after all guardrail checks pass')
-  .option('--site <domain>', 'Site domain')
-  .option('--run <id>', 'Run ID of the verified patch set to promote')
-  .action(() => {
-    console.log('[vaeo promote] not yet implemented');
+  .description('Human approval gate — re-validate and deploy pending_approval fixes to live')
+  .requiredOption('--run-id <id>',    'Run ID of the patch set to promote')
+  .requiredOption('--tenant-id <id>', 'Tenant UUID')
+  .requiredOption('--site-id <id>',   'Site UUID')
+  .option('--action-id <id>',         'Promote a single fix by action_queue ID')
+  .option('--all',                    'Promote all pending_approval fixes for this run')
+  .action(async (opts: { runId: string; tenantId: string; siteId: string; actionId?: string; all?: boolean }) => {
+    await runPromoteCli({ runId: opts.runId, tenantId: opts.tenantId, siteId: opts.siteId, actionId: opts.actionId, all: opts.all });
   });
 
 // ── vaeo rollback ────────────────────────────────────────────────────────────
 
 program
   .command('rollback')
-  .description('Restore all fields in a patch manifest to their before_value')
+  .description('Reverse deployed fixes for a run using the rollback_manifest stored at deploy time')
+  .requiredOption('--run-id <id>',    'Run ID of the patch set to roll back')
+  .requiredOption('--tenant-id <id>', 'Tenant UUID')
+  .requiredOption('--site-id <id>',   'Site UUID')
+  .option('--action-id <id>',         'Roll back a single fix by action_queue ID')
+  .option('--all',                    'Roll back all deployed/regression_detected fixes for this run')
+  .action(async (opts: { runId: string; tenantId: string; siteId: string; actionId?: string; all?: boolean }) => {
+    await runRollbackCli({ runId: opts.runId, tenantId: opts.tenantId, siteId: opts.siteId, actionId: opts.actionId, all: opts.all });
+  });
+
+// ── legacy vaeo rollback (patch-engine rollback-runner) ───────────────────────
+// Kept for direct manifest-level rollbacks initiated from vaeo-ground-truth CLI.
+
+program
+  .command('rollback-manifest')
+  .description('Restore all fields in a patch manifest to their before_value (legacy)')
   .requiredOption('--run-id <id>', 'Run ID of the manifest to roll back')
   .requiredOption('--tenant <id>', 'Tenant ID that owns this run')
   .action(async (opts: { runId: string; tenant: string }) => {

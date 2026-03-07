@@ -1,0 +1,53 @@
+import Link from 'next/link';
+import { getAllSites } from '@/lib/queries';
+
+export default async function SitesPage() {
+  const sites = await getAllSites();
+
+  return (
+    <>
+      <h1 className="text-xl font-semibold mb-6">Sites</h1>
+      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-slate-50 text-left text-xs text-slate-500 uppercase tracking-wide">
+              <th className="px-5 py-3 font-medium">Site</th>
+              <th className="px-5 py-3 font-medium">CMS</th>
+              <th className="px-5 py-3 font-medium">Last run</th>
+              <th className="px-5 py-3 font-medium">Added</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {sites.length === 0 && (
+              <tr>
+                <td colSpan={4} className="px-5 py-8 text-center text-slate-400 text-xs">
+                  No sites registered.
+                </td>
+              </tr>
+            )}
+            {sites.map((s) => (
+              <tr key={s.site_id} className="hover:bg-slate-50 transition-colors">
+                <td className="px-5 py-3 font-medium">
+                  {s.last_run_id ? (
+                    <Link href={`/runs/${s.last_run_id}`} className="text-blue-600 hover:underline">
+                      {s.site_url}
+                    </Link>
+                  ) : (
+                    <span className="text-slate-700">{s.site_url}</span>
+                  )}
+                </td>
+                <td className="px-5 py-3 text-slate-500 uppercase text-xs">{s.cms_type}</td>
+                <td className="px-5 py-3 text-xs text-slate-400">
+                  {s.last_run_at ? new Date(s.last_run_at).toLocaleString() : '—'}
+                </td>
+                <td className="px-5 py-3 text-xs text-slate-400">
+                  {new Date(s.created_at).toLocaleDateString()}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}

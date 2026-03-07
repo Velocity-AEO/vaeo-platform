@@ -17,7 +17,7 @@
  *   - Target: under 5 minutes for 50 fields (adapter is the bottleneck, not us)
  */
 
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import type {
   CMSAdapter,
   PatchManifest,
@@ -25,9 +25,6 @@ import type {
   ActionLogEvent,
   CmsType,
 } from '../../../packages/core/types.js';
-import { config } from '../../../packages/core/config.js';
-import { ShopifyAdapter } from '../../adapters/shopify/src/index.js';
-import { WordPressAdapter } from '../../adapters/wordpress/src/index.js';
 
 // ── Table name constant ───────────────────────────────────────────────────────
 
@@ -101,10 +98,14 @@ function writeLog(
 // ── Supabase factory ──────────────────────────────────────────────────────────
 
 /**
- * Creates a service-role Supabase client for server-side use.
- * Service-role bypasses RLS; we enforce tenant isolation manually via WHERE clauses.
+ * Creates a service-role Supabase client using dynamic imports so that
+ * neither @supabase/supabase-js nor config.ts are loaded at module-load time.
  */
-function makeSupabase(): SupabaseClient {
+async function makeSupabase(): Promise<SupabaseClient> {
+  const [{ createClient }, { config }] = await Promise.all([
+    import('@supabase/supabase-js'),
+    import('../../../packages/core/config.js'),
+  ]);
   return createClient(config.supabase.url, config.supabase.serviceRoleKey, {
     auth: { persistSession: false },
   });
@@ -114,13 +115,18 @@ function makeSupabase(): SupabaseClient {
 
 /**
  * Returns the correct CMS adapter based on the cms_type stored in the manifest.
- * Throws clearly if an unknown cms_type appears — never falls back silently.
+ * Adapters are imported dynamically so their static imports (e.g. Shopify's
+ * config.ts import) do not participate in the module-load cycle.
  */
-function adapterForCms(cmsType: CmsType): CMSAdapter {
-  if (cmsType === 'shopify') return new ShopifyAdapter();
-  if (cmsType === 'wordpress') return new WordPressAdapter();
-  // TypeScript narrowing ensures this is unreachable for valid CmsType values,
-  // but we guard anyway for runtime safety.
+async function adapterForCms(cmsType: CmsType): Promise<CMSAdapter> {
+  if (cmsType === 'shopify') {
+    const { ShopifyAdapter } = await import('../../adapters/shopify/src/index.js');
+    return new ShopifyAdapter();
+  }
+  if (cmsType === 'wordpress') {
+    const { WordPressAdapter } = await import('../../adapters/wordpress/src/index.js');
+    return new WordPressAdapter();
+  }
   throw new Error(`[rollback-runner] Unknown cms_type: ${String(cmsType)}`);
 }
 
@@ -196,7 +202,7 @@ export async function executeRollback(
   tenantId: string,
 ): Promise<ExecuteRollbackResult> {
   const startMs = Date.now();
-  const supabase = makeSupabase();
+  const supabase = await makeSupabase();
 
   writeLog({ run_id: runId, site_id: '', stage: 'rollback:start', status: 'pending' });
 
@@ -241,7 +247,7 @@ export async function executeRollback(
 
   // ── Load adapter and reverse patches ──────────────────────────────────────
 
-  const adapter = adapterForCms(cms_type);
+  const adapter = await adapterForCms(cms_type);
 
   // Only reverse patches that were actually applied — in reverse order
   const toReverse = patches.filter((p) => p.applied).reverse();
@@ -360,7 +366,7 @@ export async function verifyRollback(
   runId: string,
   tenantId: string,
 ): Promise<VerifyRollbackResult> {
-  const supabase = makeSupabase();
+  const supabase = await makeSupabase();
 
   writeLog({ run_id: runId, site_id: '', stage: 'rollback:verify_start', status: 'pending' });
 
@@ -375,7 +381,7 @@ export async function verifyRollback(
   }
 
   const { site_id, cms_type, patches } = row;
-  const adapter = adapterForCms(cms_type);
+  const adapter = await adapterForCms(cms_type);
 
   // ── Fetch current CMS state ────────────────────────────────────────────────
 

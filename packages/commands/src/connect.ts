@@ -18,6 +18,8 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { createClient } from '@supabase/supabase-js';
+import { getConfig } from '../../core/config.js';
 import { writeLog } from '../../action-log/src/index.js';
 
 // ── Public types ───────────────────────────────────────────────────────────────
@@ -172,10 +174,8 @@ async function realVerifyWordPress(
 }
 
 async function realUpsertSite(record: SiteRecord): Promise<void> {
-  // Dynamic imports so missing env vars never crash at module-load time.
-  const { config }       = await import('../../core/config.js');
-  const { createClient } = await import('@supabase/supabase-js');
-  const client = createClient(config.supabase.url, config.supabase.serviceRoleKey, {
+  const cfg    = getConfig();
+  const client = createClient(cfg.supabaseUrl, cfg.supabaseServiceKey, {
     auth: { persistSession: false },
   });
   const { error } = await client

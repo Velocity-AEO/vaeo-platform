@@ -210,11 +210,63 @@ function loadConfig(): VaeoConfig {
   };
 }
 
-// ── Singleton export ──────────────────────────────────────────────────────────
+// ── Lazy singleton ────────────────────────────────────────────────────────────
+
+/**
+ * Internal cache — undefined until first access.
+ * loadConfig() is deferred until a property is first read so that importing
+ * this module never throws at module-load time (prevents ESM cycle errors when
+ * multiple packages load config.ts before env vars are available).
+ */
+let _config: VaeoConfig | undefined;
+
+function lazyConfig(): VaeoConfig {
+  if (!_config) _config = loadConfig();
+  return _config;
+}
 
 /**
  * Typed, validated configuration object.
- * Loaded once at module import time — throws immediately if any required
- * variable is absent so misconfigured deploys fail fast at startup.
+ *
+ * Backed by a Proxy so that loadConfig() (and therefore process.env reads)
+ * run on first property access rather than at module-load time.
+ * This breaks the ESM initialisation cycle that occurs when the terminal CLI
+ * loads both packages/patch-engine (static import of config) and
+ * packages/action-log (dynamic import of config) in the same process.
+ *
+ * Existing static importers (`import { config } from '…/config.js'`) continue
+ * to work without any changes — the Proxy is transparent to them.
  */
-export const config: VaeoConfig = loadConfig();
+export const config = new Proxy({}, {
+  get(_target, prop) {
+    return (lazyConfig() as unknown as Record<string | symbol, unknown>)[prop];
+  },
+}) as unknown as VaeoConfig;
+
+/**
+ * Flat accessor used by the command pipeline (audit / optimize / verify /
+ * promote / rollback). Commands import this via dynamic import:
+ *
+ *   const { getConfig } = await import('../../core/config.js');
+ *   const cfg = getConfig();
+ *   const db  = createClient(cfg.supabaseUrl, cfg.supabaseServiceKey);
+ *
+ * Reads ONLY the two Supabase env vars directly — does NOT trigger
+ * loadConfig() (which requires all env vars). This allows the connect
+ * command to work even when unrelated env vars (REDIS_URL, etc.) are absent.
+ */
+export function getConfig(): { supabaseUrl: string; supabaseServiceKey: string } {
+  const url = process.env['SUPABASE_URL'];
+  const key = process.env['SUPABASE_SERVICE_ROLE_KEY'];
+  if (!url?.trim()) {
+    throw new Error('[vaeo/config] Missing required environment variable: SUPABASE_URL\n  Ensure it is set in Doppler (or .env for local dev).');
+  }
+  if (!key?.trim()) {
+    throw new Error('[vaeo/config] Missing required environment variable: SUPABASE_SERVICE_ROLE_KEY\n  Ensure it is set in Doppler (or .env for local dev).');
+  }
+  return {
+    supabaseUrl:        url.trim(),
+    supabaseServiceKey: key.trim(),
+  };
+}
+

@@ -1,0 +1,121 @@
+{
+  "usableSessionsCount": 2,
+  "retiredSessionsCount": 0,
+  "sessions": [
+    {
+      "id": "session_IGXM2Dilx0",
+      "cookieJar": {
+        "version": "tough-cookie@6.0.0",
+        "storeType": "MemoryCookieStore",
+        "rejectPublicSuffixes": true,
+        "enableLooseMode": false,
+        "allowSpecialUseDomain": true,
+        "prefixSecurity": "silent",
+        "cookies": []
+      },
+      "userData": {},
+      "maxErrorScore": 3,
+      "errorScoreDecrement": 0.5,
+      "expiresAt": "2026-03-07T02:19:45.773Z",
+      "createdAt": "2026-03-07T01:29:45.773Z",
+      "usageCount": 0,
+      "maxUsageCount": 50,
+      "errorScore": 0
+    },
+    {
+      "id": "session_tJB9mEIfW3",
+      "cookieJar": {
+        "version": "tough-cookie@6.0.0",
+        "storeType": "MemoryCookieStore",
+        "rejectPublicSuffixes": true,
+        "enableLooseMode": false,
+        "allowSpecialUseDomain": true,
+        "prefixSecurity": "silent",
+        "cookies": [
+          {
+            "key": "localization",
+            "value": "US",
+            "expires": "2027-03-07T01:29:49.352Z",
+            "domain": "cococabanalife.com",
+            "path": "/",
+            "hostOnly": true,
+            "creation": "2026-03-07T01:29:52.342Z",
+            "lastAccessed": "2026-03-07T01:29:52.342Z"
+          },
+          {
+            "key": "cart_currency",
+            "value": "USD",
+            "expires": "2026-03-21T01:29:49.352Z",
+            "domain": "cococabanalife.com",
+            "path": "/",
+            "hostOnly": true,
+            "creation": "2026-03-07T01:29:52.342Z",
+            "lastAccessed": "2026-03-07T01:29:52.342Z"
+          },
+          {
+            "key": "_shopify_y",
+            "value": "43da98a7-9a52-47ca-8295-7e4008d0ad06",
+            "expires": "2027-03-07T07:29:49.352Z",
+            "domain": "cococabanalife.com",
+            "path": "/",
+            "hostOnly": false,
+            "creation": "2026-03-07T01:29:52.342Z",
+            "lastAccessed": "2026-03-07T01:29:52.342Z"
+          },
+          {
+            "key": "_shopify_s",
+            "value": "69b326e0-3faa-4e34-901f-86b865f499c6",
+            "expires": "2026-03-07T01:59:49.352Z",
+            "domain": "cococabanalife.com",
+            "path": "/",
+            "hostOnly": false,
+            "creation": "2026-03-07T01:29:52.342Z",
+            "lastAccessed": "2026-03-07T01:29:52.342Z"
+          },
+          {
+            "key": "_shopify_analytics",
+            "value": ":AZzF6j_PAAEARqfE2VWdEgZEXqn1jTZmshU1AvKNXgDu6gXJ-YRoPOO-q1m-u6OLKuXr:",
+            "expires": "2027-03-07T01:29:49.352Z",
+            "domain": "cococabanalife.com",
+            "path": "/",
+            "secure": true,
+            "httpOnly": true,
+            "hostOnly": true,
+            "creation": "2026-03-07T01:29:52.342Z",
+            "lastAccessed": "2026-03-07T01:29:52.342Z"
+          },
+          {
+            "key": "_shopify_essential",
+            "value": ":AZzF6j8DAAEArM2ZD28GyaPHHawUMTtrlag-B1he_vWG9N-m1gbwMJPmWgQRa72SLLFPzn1Cm7rzkZGAQIEE5xg3n2Coy62mCzE_nikModRb204hmAB8-8tGUg0A9u_7auPMKzzUDNJJUW6w-yzLx2GYz8z6Dqd7LVmZFy0Qiqz4xKy-P1TVm3Qe8X5ouayZUF6vKMdvZLFmB2qjI450mr3zZqNXaED-icmqxSfJU4Tf-PKzstPKsYS4_cKzLOxZmKe4q7_dy0-K4NYjHr8H0fai3h5WcdA8vIy7rC4M9EGOOlmsVJUOqlkxTndoNMfqBUZti5d9e4hgfHKRNKCVjLkUTgReUlCUKxtDhprFGLoIYRXmCK3BipjD52MPWm-vZGiULTAYwE7nw_EUOX7TsBGadHJ_:",
+            "expires": "2027-03-07T01:29:51.468Z",
+            "domain": "cococabanalife.com",
+            "path": "/",
+            "secure": true,
+            "httpOnly": true,
+            "hostOnly": true,
+            "creation": "2026-03-07T01:29:52.342Z",
+            "lastAccessed": "2026-03-07T01:29:52.342Z"
+          },
+          {
+            "key": "_fbp",
+            "value": "fb.1.1772846991599.340918126932851643",
+            "expires": "2026-06-05T01:29:51.000Z",
+            "domain": "cococabanalife.com",
+            "path": "/",
+            "hostOnly": false,
+            "creation": "2026-03-07T01:29:52.342Z",
+            "lastAccessed": "2026-03-07T01:29:52.342Z"
+          }
+        ]
+      },
+      "userData": {},
+      "maxErrorScore": 3,
+      "errorScoreDecrement": 0.5,
+      "expiresAt": "2026-03-07T02:19:45.775Z",
+      "createdAt": "2026-03-07T01:29:45.775Z",
+      "usageCount": 1,
+      "maxUsageCount": 50,
+      "errorScore": 0
+    }
+  ]
+}

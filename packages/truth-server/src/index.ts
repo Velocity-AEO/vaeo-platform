@@ -26,7 +26,8 @@ import type {
   ActionLogEvent,
   CmsType,
 } from '../../../packages/core/types.js';
-import { config } from '../../../packages/core/config.js';
+// config is loaded lazily in makeSupabaseClient / makeR2Config to avoid loading
+// all env vars (e.g. REDIS_URL) at module initialisation time.
 
 // ── Table / storage constants — change here, not in queries ──────────────────
 
@@ -112,31 +113,42 @@ function writeLog(
 // ── Supabase client factory ───────────────────────────────────────────────────
 
 /**
- * Creates a Supabase client using the service-role key so RLS policies are
- * evaluated against the tenant_id we explicitly pass — not the anon user.
- * The service-role key is never exposed to the browser; server-side only.
+ * Creates a Supabase client using only SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY —
+ * does NOT require the full loadConfig() so unrelated env vars (REDIS_URL etc.)
+ * need not be present.
  */
-function makeSupabaseClient(): SupabaseClient {
-  return createClient(config.supabase.url, config.supabase.serviceRoleKey, {
+async function makeSupabaseClient(): Promise<SupabaseClient> {
+  const { getConfig } = await import('../../../packages/core/config.js');
+  const cfg = getConfig();
+  return createClient(cfg.supabaseUrl, cfg.supabaseServiceKey, {
     auth: { persistSession: false },
   });
 }
 
 // ── R2 client factory ─────────────────────────────────────────────────────────
 
+interface R2Context {
+  client: S3Client;
+  bucketName: string;
+}
+
 /**
  * Creates an AWS S3-compatible client pointing at Cloudflare R2.
- * Credentials come from config.r2 — never from process.env.
+ * Uses a dynamic import of config so R2 credentials are read only when needed.
  */
-function makeR2Client(): S3Client {
-  return new S3Client({
-    region: 'auto',
-    endpoint: config.r2.endpoint,
-    credentials: {
-      accessKeyId: config.r2.accessKeyId,
-      secretAccessKey: config.r2.secretAccessKey,
-    },
-  });
+async function makeR2Config(): Promise<R2Context> {
+  const { config } = await import('../../../packages/core/config.js');
+  return {
+    client: new S3Client({
+      region: 'auto',
+      endpoint: config.r2.endpoint,
+      credentials: {
+        accessKeyId: config.r2.accessKeyId,
+        secretAccessKey: config.r2.secretAccessKey,
+      },
+    }),
+    bucketName: config.r2.bucketName,
+  };
 }
 
 // ── Hashing ───────────────────────────────────────────────────────────────────
@@ -221,6 +233,7 @@ function deepDiff(
  */
 async function uploadToR2(
   r2: S3Client,
+  bucketName: string,
   tenantId: string,
   runId: string,
   data: Record<string, unknown>,
@@ -229,14 +242,14 @@ async function uploadToR2(
   const body = JSON.stringify(data);
 
   await r2.send(new PutObjectCommand({
-    Bucket: config.r2.bucketName,
+    Bucket: bucketName,
     Key: key,
     Body: body,
     ContentType: 'application/json',
     Metadata: { tenant_id: tenantId, run_id: runId },
   }));
 
-  return `r2://${config.r2.bucketName}/${key}`;
+  return `r2://${bucketName}/${key}`;
 }
 
 /**
@@ -245,6 +258,7 @@ async function uploadToR2(
  */
 async function downloadFromR2(
   r2: S3Client,
+  bucketName: string,
   r2Url: string,
 ): Promise<Record<string, unknown>> {
   // r2Url format: r2://{bucket}/{key}
@@ -252,7 +266,7 @@ async function downloadFromR2(
   const key = withoutScheme;
 
   const result = await r2.send(new GetObjectCommand({
-    Bucket: config.r2.bucketName,
+    Bucket: bucketName,
     Key: key,
   }));
 
@@ -273,12 +287,19 @@ async function downloadFromR2(
  * The adapter is swapped at construction time so the truth-server stays CMS-agnostic.
  */
 export class TruthServer {
-  private readonly supabase: SupabaseClient;
-  private readonly r2: S3Client;
+  private _supabase: SupabaseClient | undefined;
+  private _r2: R2Context | undefined;
 
-  constructor(private readonly adapter: CMSAdapter) {
-    this.supabase = makeSupabaseClient();
-    this.r2 = makeR2Client();
+  constructor(private readonly adapter: CMSAdapter) {}
+
+  private async getSupabase(): Promise<SupabaseClient> {
+    if (!this._supabase) this._supabase = await makeSupabaseClient();
+    return this._supabase;
+  }
+
+  private async getR2(): Promise<R2Context> {
+    if (!this._r2) this._r2 = await makeR2Config();
+    return this._r2;
   }
 
   /**
@@ -318,7 +339,8 @@ export class TruthServer {
       // Upload full payload to R2 — throw if upload fails, do not proceed
       let r2Url: string;
       try {
-        r2Url = await uploadToR2(this.r2, tenantId, runId, stateData);
+        const r2 = await this.getR2();
+        r2Url = await uploadToR2(r2.client, r2.bucketName, tenantId, runId, stateData);
       } catch (err) {
         writeLog({ run_id: runId, site_id: siteId, stage: 'snapshot:r2_upload_error', status: 'error' });
         throw new Error(
@@ -338,7 +360,8 @@ export class TruthServer {
     // 4. Insert row into Supabase — tenant_id always included
     let snapshotId: string;
     try {
-      const { data, error } = await this.supabase
+      const supabase = await this.getSupabase();
+      const { data, error } = await supabase
         .from(TABLE_SNAPSHOTS)
         .insert({
           run_id: runId,
@@ -395,14 +418,15 @@ export class TruthServer {
     let after: SiteSnapshot;
 
     try {
+      const supabase = await this.getSupabase();
       const [beforeRes, afterRes] = await Promise.all([
-        this.supabase
+        supabase
           .from(TABLE_SNAPSHOTS)
           .select('*')
           .eq('run_id', runIdBefore)
           .eq('tenant_id', tenantId)
           .single(),
-        this.supabase
+        supabase
           .from(TABLE_SNAPSHOTS)
           .select('*')
           .eq('run_id', runIdAfter)
@@ -467,7 +491,8 @@ export class TruthServer {
     // Fetch snapshot — tenant_id always in WHERE clause
     let row: SiteSnapshot;
     try {
-      const { data, error } = await this.supabase
+      const supabase = await this.getSupabase();
+      const { data, error } = await supabase
         .from(TABLE_SNAPSHOTS)
         .select('*')
         .eq('run_id', runId)
@@ -521,7 +546,8 @@ export class TruthServer {
     const data = row.snapshot_data;
     if (data['_storage'] === 'r2' && typeof data['_r2_url'] === 'string') {
       try {
-        return await downloadFromR2(this.r2, data['_r2_url']);
+        const r2 = await this.getR2();
+        return await downloadFromR2(r2.client, r2.bucketName, data['_r2_url']);
       } catch (err) {
         throw new Error(
           `[truth-server] resolveSnapshotData: R2 download failed for run ${row.run_id}: ${err instanceof Error ? err.message : String(err)}`,

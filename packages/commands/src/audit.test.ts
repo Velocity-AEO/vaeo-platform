@@ -1,0 +1,412 @@
+/**
+ * packages/commands/src/audit.test.ts
+ *
+ * Tests for runAudit.
+ * All external deps (Supabase, detectors, risk-scorer, guardrail) are injected.
+ */
+
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+
+import {
+  runAudit,
+  type AuditRequest,
+  type AuditCommandOps,
+  type ActionQueueRow,
+} from './audit.js';
+
+import type { CrawlResultRow, DetectedIssue, DetectorCtx } from '../../detectors/src/index.js';
+import type { ScoredIssue } from '../../risk-scorer/src/index.js';
+import type { ProposedAction } from '../../guardrail/src/index.js';
+
+// ── Fixtures ──────────────────────────────────────────────────────────────────
+
+const RUN_ID    = 'run-uuid-001';
+const TENANT_ID = 'tenant-uuid-001';
+const SITE_ID   = 'site-uuid-001';
+
+function baseReq(overrides: Partial<AuditRequest> = {}): AuditRequest {
+  return {
+    run_id:    RUN_ID,
+    tenant_id: TENANT_ID,
+    site_id:   SITE_ID,
+    cms:       'shopify',
+    ...overrides,
+  };
+}
+
+function makeCrawlRow(url = 'https://example.com/'): CrawlResultRow {
+  return {
+    url,
+    status_code:    200,
+    title:          null,        // missing title → will trigger META_TITLE_MISSING
+    meta_desc:      null,
+    h1:             [],
+    h2:             [],
+    images:         null,
+    internal_links: null,
+    schema_blocks:  null,
+    canonical:      null,
+    redirect_chain: null,
+    load_time_ms:   null,
+  };
+}
+
+function makeDetectedIssue(overrides: Partial<DetectedIssue> = {}): DetectedIssue {
+  return {
+    run_id:       RUN_ID,
+    tenant_id:    TENANT_ID,
+    site_id:      SITE_ID,
+    cms:          'shopify',
+    url:          'https://example.com/',
+    issue_type:   'META_TITLE_MISSING',
+    issue_detail: { title: null },
+    proposed_fix: { action: 'generate_title' },
+    risk_score:   3,
+    auto_fix:     true,
+    category:     'metadata',
+    ...overrides,
+  };
+}
+
+function makeScoredIssue(overrides: Partial<ScoredIssue> = {}): ScoredIssue {
+  return {
+    ...makeDetectedIssue(),
+    risk_score:          3,
+    approval_required:   false,
+    auto_deploy:         true,
+    fix_source:          'auto_generated',
+    deployment_behavior: 'auto_deploy — no approval needed',
+    ...overrides,
+  };
+}
+
+function makeProposedAction(overrides: Partial<ProposedAction> = {}): ProposedAction {
+  return {
+    idempotency_key: 'run-uuid-001:https://example.com/:META_TITLE_MISSING:0',
+    category:        'content',
+    patch_type:      'meta_patch',
+    url:             'https://example.com/',
+    ...overrides,
+  };
+}
+
+/** Happy-path ops. Returns 1 crawl row → 1 detected issue → 1 scored → 1 action. */
+function happy(overrides: Partial<AuditCommandOps> = {}): Partial<AuditCommandOps> {
+  return {
+    loadCrawlRows: async () => [makeCrawlRow()],
+    detectIssues:  (_rows: CrawlResultRow[], _ctx: DetectorCtx) => [makeDetectedIssue()],
+    scoreIssues:   (_issues: DetectedIssue[]) => [makeScoredIssue()],
+    evaluateOrder: (_scored: ScoredIssue[]) => [makeProposedAction()],
+    writeQueue:    async (_rows: ActionQueueRow[]) => _rows.length,
+    ...overrides,
+  };
+}
+
+/** Capture all JSON log lines written to stdout during fn(). */
+async function captureLog(fn: () => Promise<void>): Promise<Record<string, unknown>[]> {
+  const chunks: string[] = [];
+  const orig = process.stdout.write.bind(process.stdout);
+  // @ts-expect-error — test-only stdout capture
+  process.stdout.write = (chunk: unknown): boolean => { chunks.push(String(chunk)); return true; };
+  try {
+    await fn();
+  } finally {
+    process.stdout.write = orig;
+  }
+  return chunks
+    .join('')
+    .split('\n')
+    .filter((l) => l.trim().startsWith('{'))
+    .map((l) => JSON.parse(l.trim()) as Record<string, unknown>);
+}
+
+// ── runAudit — happy path ─────────────────────────────────────────────────────
+
+describe('runAudit — happy path returns status=completed', () => {
+  it('returns status=completed with correct fields', async () => {
+    const result = await runAudit(baseReq(), happy());
+    assert.equal(result.status,                'completed');
+    assert.equal(result.run_id,                RUN_ID);
+    assert.equal(result.site_id,               SITE_ID);
+    assert.equal(result.tenant_id,             TENANT_ID);
+    assert.equal(result.issues_found,          1);
+    assert.equal(result.action_queue_populated, true);
+    assert.equal(result.error,                 undefined);
+  });
+
+  it('issues_by_priority has all 8 keys', async () => {
+    const result = await runAudit(baseReq(), happy());
+    for (let p = 1; p <= 8; p++) {
+      assert.ok(p in result.issues_by_priority, `Missing priority key ${p}`);
+    }
+  });
+
+  it('content issues land in priority 5', async () => {
+    const result = await runAudit(baseReq(), happy());
+    // metadata → content → priority 5
+    assert.equal(result.issues_by_priority[5], 1);
+  });
+
+  it('completed_at is a valid ISO timestamp', async () => {
+    const result = await runAudit(baseReq(), happy());
+    assert.ok(!isNaN(Date.parse(result.completed_at)));
+  });
+});
+
+// ── runAudit — priority mapping ───────────────────────────────────────────────
+
+describe('runAudit — detector category → guardrail priority mapping', () => {
+  it('metadata → content (priority 5)', async () => {
+    const result = await runAudit(baseReq(), happy({
+      detectIssues: () => [makeDetectedIssue({ category: 'metadata' })],
+      scoreIssues:  () => [makeScoredIssue({ category: 'metadata' })],
+    }));
+    assert.equal(result.issues_by_priority[5], 1);
+  });
+
+  it('images → enhancements (priority 8)', async () => {
+    const result = await runAudit(baseReq(), happy({
+      detectIssues: () => [makeDetectedIssue({ category: 'images', issue_type: 'IMG_ALT_MISSING' })],
+      scoreIssues:  () => [makeScoredIssue({ category: 'images', issue_type: 'IMG_ALT_MISSING' })],
+    }));
+    assert.equal(result.issues_by_priority[8], 1);
+  });
+
+  it('errors → errors (priority 1)', async () => {
+    const result = await runAudit(baseReq(), happy({
+      detectIssues: () => [makeDetectedIssue({ category: 'errors', issue_type: 'ERR_404', risk_score: 8 })],
+      scoreIssues:  () => [makeScoredIssue({ category: 'errors', issue_type: 'ERR_404', risk_score: 8 })],
+    }));
+    assert.equal(result.issues_by_priority[1], 1);
+  });
+
+  it('schema → schema (priority 6)', async () => {
+    const result = await runAudit(baseReq(), happy({
+      detectIssues: () => [makeDetectedIssue({ category: 'schema', issue_type: 'SCHEMA_MISSING' })],
+      scoreIssues:  () => [makeScoredIssue({ category: 'schema', issue_type: 'SCHEMA_MISSING' })],
+    }));
+    assert.equal(result.issues_by_priority[6], 1);
+  });
+
+  it('multi-category: 4 issues spread across priorities, totals match', async () => {
+    const issues = [
+      makeScoredIssue({ category: 'errors',    issue_type: 'ERR_404',            risk_score: 8 }),
+      makeScoredIssue({ category: 'canonicals', issue_type: 'CANONICAL_MISSING', risk_score: 6 }),
+      makeScoredIssue({ category: 'metadata',  issue_type: 'META_TITLE_MISSING', risk_score: 3 }),
+      makeScoredIssue({ category: 'images',    issue_type: 'IMG_ALT_MISSING',    risk_score: 2 }),
+    ];
+    const result = await runAudit(baseReq(), happy({
+      detectIssues: () => issues.map(i => i as unknown as DetectedIssue),
+      scoreIssues:  () => issues,
+    }));
+    assert.equal(result.issues_found, 4);
+    assert.equal(result.issues_by_priority[1], 1); // errors
+    assert.equal(result.issues_by_priority[3], 1); // canonicals
+    assert.equal(result.issues_by_priority[5], 1); // metadata → content
+    assert.equal(result.issues_by_priority[8], 1); // images → enhancements
+    // Total across all priorities
+    const total = Object.values(result.issues_by_priority).reduce((a, b) => a + b, 0);
+    assert.equal(total, 4);
+  });
+});
+
+// ── runAudit — queue rows ─────────────────────────────────────────────────────
+
+describe('runAudit — action_queue rows have correct shape', () => {
+  it('writeQueue is called with correct fields', async () => {
+    let capturedRows: ActionQueueRow[] = [];
+    await runAudit(baseReq(), happy({
+      writeQueue: async (rows) => { capturedRows = rows; return rows.length; },
+    }));
+    assert.equal(capturedRows.length, 1);
+    const row = capturedRows[0]!;
+    assert.equal(row.run_id,           RUN_ID);
+    assert.equal(row.tenant_id,        TENANT_ID);
+    assert.equal(row.site_id,          SITE_ID);
+    assert.equal(row.execution_status, 'queued');
+    assert.equal(typeof row.risk_score,  'number');
+    assert.equal(typeof row.priority,    'number');
+    assert.ok(row.priority >= 1 && row.priority <= 8);
+    assert.ok(['errors','redirects','canonicals','indexing','content','schema','performance','enhancements'].includes(row.category));
+  });
+
+  it('action_queue_populated=false when no issues found', async () => {
+    const result = await runAudit(baseReq(), happy({
+      detectIssues: () => [],
+      scoreIssues:  () => [],
+      evaluateOrder: () => [],
+      writeQueue:   async () => { throw new Error('should not be called'); },
+    }));
+    assert.equal(result.action_queue_populated, false);
+    assert.equal(result.issues_found,           0);
+    assert.equal(result.status,                 'completed');
+  });
+
+  it('rows are sorted by priority ascending, then risk_score descending', async () => {
+    let capturedRows: ActionQueueRow[] = [];
+    const issues: ScoredIssue[] = [
+      makeScoredIssue({ category: 'metadata', issue_type: 'META_TITLE_MISSING', risk_score: 2 }),
+      makeScoredIssue({ category: 'errors',   issue_type: 'ERR_404',            risk_score: 8 }),
+      makeScoredIssue({ category: 'metadata', issue_type: 'META_DESC_MISSING',  risk_score: 3 }),
+    ];
+    await runAudit(baseReq(), happy({
+      detectIssues: () => issues as unknown as DetectedIssue[],
+      scoreIssues:  () => issues,
+      writeQueue:   async (rows) => { capturedRows = rows; return rows.length; },
+    }));
+    // errors (P1) first, then metadata (P5) sorted by risk_score desc
+    assert.equal(capturedRows[0]!.priority,    1);
+    assert.equal(capturedRows[1]!.priority,    5);
+    assert.equal(capturedRows[2]!.priority,    5);
+    assert.ok(capturedRows[1]!.risk_score >= capturedRows[2]!.risk_score);
+  });
+});
+
+// ── runAudit — validation failures ───────────────────────────────────────────
+
+describe('runAudit — validation failures return status=failed without throwing', () => {
+  it('returns status=failed when run_id is empty', async () => {
+    const result = await runAudit({ ...baseReq(), run_id: '' }, happy());
+    assert.equal(result.status, 'failed');
+    assert.ok(result.error?.includes('run_id'));
+  });
+
+  it('returns status=failed when tenant_id is empty', async () => {
+    const result = await runAudit({ ...baseReq(), tenant_id: '' }, happy());
+    assert.equal(result.status, 'failed');
+    assert.ok(result.error?.includes('tenant_id'));
+  });
+
+  it('returns status=failed when site_id is empty', async () => {
+    const result = await runAudit({ ...baseReq(), site_id: '' }, happy());
+    assert.equal(result.status, 'failed');
+    assert.ok(result.error?.includes('site_id'));
+  });
+
+  it('does not throw when run_id is empty', async () => {
+    await assert.doesNotReject(() => runAudit({ ...baseReq(), run_id: '' }, happy()));
+  });
+
+  it('returns status=failed when no crawl rows found', async () => {
+    const result = await runAudit(baseReq(), happy({
+      loadCrawlRows: async () => [],
+    }));
+    assert.equal(result.status, 'failed');
+    assert.ok(result.error?.includes('No crawl_results'));
+  });
+});
+
+// ── runAudit — failure cases ──────────────────────────────────────────────────
+
+describe('runAudit — error handling never throws', () => {
+  it('returns status=failed when loadCrawlRows throws', async () => {
+    const result = await runAudit(baseReq(), happy({
+      loadCrawlRows: async () => { throw new Error('Supabase connection refused'); },
+    }));
+    assert.equal(result.status, 'failed');
+    assert.ok(result.error?.includes('Supabase connection refused'));
+  });
+
+  it('does not throw when loadCrawlRows throws', async () => {
+    await assert.doesNotReject(() =>
+      runAudit(baseReq(), happy({
+        loadCrawlRows: async () => { throw new Error('timeout'); },
+      })),
+    );
+  });
+
+  it('returns status=failed when detectIssues throws', async () => {
+    const result = await runAudit(baseReq(), happy({
+      detectIssues: () => { throw new Error('detector crash'); },
+    }));
+    assert.equal(result.status, 'failed');
+    assert.ok(result.error?.includes('detector crash'));
+  });
+
+  it('returns status=failed when writeQueue throws', async () => {
+    const result = await runAudit(baseReq(), happy({
+      writeQueue: async () => { throw new Error('action_queue insert failed'); },
+    }));
+    assert.equal(result.status, 'failed');
+    assert.ok(result.error?.includes('action_queue insert failed'));
+  });
+
+  it('does not throw when writeQueue throws', async () => {
+    await assert.doesNotReject(() =>
+      runAudit(baseReq(), happy({
+        writeQueue: async () => { throw new Error('db error'); },
+      })),
+    );
+  });
+});
+
+// ── runAudit — ActionLog entries ──────────────────────────────────────────────
+
+describe('runAudit — ActionLog entries', () => {
+  it('writes audit:start before audit:complete', async () => {
+    const entries = await captureLog(() => runAudit(baseReq(), happy()));
+    const startIdx    = entries.findIndex((e) => e['stage'] === 'audit:start');
+    const completeIdx = entries.findIndex((e) => e['stage'] === 'audit:complete');
+    assert.ok(startIdx    >= 0, 'audit:start not found');
+    assert.ok(completeIdx >= 0, 'audit:complete not found');
+    assert.ok(startIdx < completeIdx, 'audit:start must precede audit:complete');
+  });
+
+  it('audit:start has status=pending', async () => {
+    const entries = await captureLog(() => runAudit(baseReq(), happy()));
+    const start = entries.find((e) => e['stage'] === 'audit:start');
+    assert.ok(start, 'Expected audit:start');
+    assert.equal(start['status'], 'pending');
+  });
+
+  it('audit:complete has status=ok and issues_found in metadata', async () => {
+    const entries = await captureLog(() => runAudit(baseReq(), happy()));
+    const complete = entries.find((e) => e['stage'] === 'audit:complete');
+    assert.ok(complete, 'Expected audit:complete');
+    assert.equal(complete['status'], 'ok');
+    const meta = complete['metadata'] as Record<string, unknown>;
+    assert.equal(typeof meta['issues_found'], 'number');
+  });
+
+  it('writes audit:failed (not audit:complete) when detectIssues throws', async () => {
+    const entries = await captureLog(() =>
+      runAudit(baseReq(), happy({
+        detectIssues: () => { throw new Error('crash'); },
+      })),
+    );
+    const failed   = entries.find((e) => e['stage'] === 'audit:failed');
+    const complete = entries.find((e) => e['stage'] === 'audit:complete');
+    assert.ok(failed, 'Expected audit:failed entry');
+    assert.equal(failed['status'], 'failed');
+    assert.equal(complete, undefined, 'audit:complete must NOT appear when detectIssues throws');
+  });
+});
+
+// ── runAudit — issues_by_priority shape ──────────────────────────────────────
+
+describe('runAudit — issues_by_priority is always a complete 1-8 map', () => {
+  it('all priority keys present even with zero issues', async () => {
+    const result = await runAudit(baseReq(), happy({
+      detectIssues:  () => [],
+      scoreIssues:   () => [],
+      evaluateOrder: () => [],
+      writeQueue:    async () => 0,
+    }));
+    for (let p = 1; p <= 8; p++) {
+      assert.ok(p in result.issues_by_priority, `Missing key ${p}`);
+      assert.equal(result.issues_by_priority[p], 0);
+    }
+  });
+
+  it('all required result fields are present', async () => {
+    const result = await runAudit(baseReq(), happy());
+    assert.equal(typeof result.run_id,                 'string');
+    assert.equal(typeof result.site_id,                'string');
+    assert.equal(typeof result.tenant_id,              'string');
+    assert.equal(typeof result.issues_found,           'number');
+    assert.equal(typeof result.action_queue_populated, 'boolean');
+    assert.equal(typeof result.completed_at,           'string');
+    assert.ok(['completed', 'failed'].includes(result.status));
+  });
+});

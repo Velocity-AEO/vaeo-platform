@@ -15,7 +15,7 @@
  * Every Supabase query includes tenant_id — no cross-tenant data access.
  */
 
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import type {
   CMSAdapter,
   PatchManifest,
@@ -24,7 +24,6 @@ import type {
   CmsType,
   StageStatus,
 } from '../../../packages/core/types.js';
-import { config } from '../../../packages/core/config.js';
 
 // ── Table name constants — change here, never in queries ─────────────────────
 
@@ -116,11 +115,16 @@ function writeLog(
 // ── Supabase client ───────────────────────────────────────────────────────────
 
 /**
- * Creates a service-role Supabase client.
- * Service-role bypasses RLS so we can enforce tenant isolation ourselves
- * by always including tenant_id in every WHERE / INSERT.
+ * Creates a service-role Supabase client using dynamic imports so that
+ * neither @supabase/supabase-js nor config.ts are loaded at module-load time.
+ * This breaks the ESM cycle caused by the terminal CLI loading both
+ * patch-engine (static) and action-log (which dynamic-imports config).
  */
-function makeSupabase(): SupabaseClient {
+async function makeSupabase(): Promise<SupabaseClient> {
+  const [{ createClient }, { config }] = await Promise.all([
+    import('@supabase/supabase-js'),
+    import('../../../packages/core/config.js'),
+  ]);
   return createClient(config.supabase.url, config.supabase.serviceRoleKey, {
     auth: { persistSession: false },
   });
@@ -135,10 +139,14 @@ function makeSupabase(): SupabaseClient {
  * remains CMS-agnostic — it never calls Shopify or WordPress APIs directly.
  */
 export class PatchEngine {
-  private readonly supabase: SupabaseClient;
+  private _supabase?: SupabaseClient;
 
-  constructor(private readonly adapter: CMSAdapter) {
-    this.supabase = makeSupabase();
+  constructor(private readonly adapter: CMSAdapter) {}
+
+  /** Lazily initialises and caches the Supabase client on first call. */
+  private async db(): Promise<SupabaseClient> {
+    if (!this._supabase) this._supabase = await makeSupabase();
+    return this._supabase;
   }
 
   /**
@@ -178,7 +186,7 @@ export class PatchEngine {
 
     let manifestId: string;
     try {
-      const { data, error } = await this.supabase
+      const { data, error } = await (await this.db())
         .from(TABLE_ROLLBACK_MANIFESTS)
         .insert({
           run_id,
@@ -324,7 +332,7 @@ export class PatchEngine {
     // Fetch the rollback manifest — always filter by tenant_id
     let row: RollbackManifestRow;
     try {
-      const { data, error } = await this.supabase
+      const { data, error } = await (await this.db())
         .from(TABLE_ROLLBACK_MANIFESTS)
         .select('*')
         .eq('run_id', runId)
@@ -393,7 +401,7 @@ export class PatchEngine {
    * Used by the CLI to check whether a run is safe to roll back before committing.
    */
   async status(runId: string, tenantId: string): Promise<ManifestStatusResult> {
-    const { data, error } = await this.supabase
+    const { data, error } = await (await this.db())
       .from(TABLE_ROLLBACK_MANIFESTS)
       .select('manifest_id, run_id, status, patches, created_at')
       .eq('run_id', runId)
@@ -498,7 +506,7 @@ export class PatchEngine {
     status: ManifestStatus,
     patches: RollbackPatchEntry[],
   ): Promise<void> {
-    const { error } = await this.supabase
+    const { error } = await (await this.db())
       .from(TABLE_ROLLBACK_MANIFESTS)
       .update({ status, patches })
       .eq('manifest_id', manifestId)
