@@ -136,7 +136,7 @@ async function storeRollbackManifest(
   const { error } = await client
     .from('action_queue')
     .update({ rollback_manifest: manifest })
-    .eq('action_id', actionId);
+    .eq('id', actionId);
   if (error) {
     throw new Error(`Failed to store rollback manifest: ${error.message}`);
   }
@@ -150,7 +150,7 @@ async function fetchRollbackManifest(
   const { data, error } = await client
     .from('action_queue')
     .select('rollback_manifest')
-    .eq('action_id', actionId)
+    .eq('id', actionId)
     .eq('tenant_id', tenantId)
     .single();
   if (error || !data) return null;
