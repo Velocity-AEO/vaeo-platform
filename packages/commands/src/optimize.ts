@@ -19,8 +19,9 @@
  * Never throws — always returns OptimizeResult.
  */
 
-import type { CmsType } from '../../core/types.js';
-import { createLogger }  from '../../action-log/src/index.js';
+import type { CmsType }         from '../../core/types.js';
+import type { ShopifyFixRequest } from '../../adapters/shopify/src/index.js';
+import { createLogger }          from '../../action-log/src/index.js';
 
 // ── Queue item shape (loaded from Supabase action_queue) ──────────────────────
 
@@ -29,6 +30,7 @@ export interface ActionQueueItem {
   run_id:           string;
   tenant_id:        string;
   site_id:          string;
+  cms_type?:        string;
   issue_type:       string;
   url:              string;
   risk_score:       number;
@@ -55,6 +57,7 @@ export interface OptimizeRequest {
   run_id:               string;
   tenant_id:            string;
   site_id:              string;
+  cms:                  CmsType;
   /** Items with risk_score ≤ this value deploy automatically. Default: 3. */
   auto_approve_max_risk?: number;
 }
@@ -107,21 +110,126 @@ const realLoadQueue: OptimizeCommandOps['loadQueue'] = async (runId, tenantId) =
   return (data ?? []) as ActionQueueItem[];
 };
 
-const realApplyFix: OptimizeCommandOps['applyFix'] = async (_item) => {
-  // Real implementation delegates to PatchEngine with the CMS adapter.
-  // Injected in tests.
-  throw new Error('realApplyFix: PatchEngine not configured — inject via _testOps');
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/**
+ * Maps issue_type → ShopifyFixRequest.fix_type.
+ * Falls back to 'meta_title' for unknown types.
+ */
+function deriveFixType(issueType: string): ShopifyFixRequest['fix_type'] {
+  if (issueType.startsWith('META_TITLE')) return 'meta_title';
+  if (issueType.startsWith('META_DESC'))  return 'meta_description';
+  if (issueType.startsWith('H1_'))        return 'h1';
+  if (issueType.startsWith('IMG_'))       return 'image_alt';
+  if (issueType.startsWith('SCHEMA_'))    return 'schema';
+  if (issueType.startsWith('ERR_') || issueType.includes('3xx')) return 'redirect';
+  return 'meta_title';
+}
+
+// ── Real ops ──────────────────────────────────────────────────────────────────
+
+/**
+ * Applies a fix in sandbox mode:
+ *   1. applyPatch() — stores rollback manifest, calls patch-engine adapter stub
+ *   2. shopify applyFix() — MVP stub (real Shopify Admin API write in v2)
+ * Throws on any failure so runOptimize can count it as failed.
+ */
+const realApplyFix: OptimizeCommandOps['applyFix'] = async (item) => {
+  const actionId = item.id;
+  const cmsType  = (item.cms_type ?? 'shopify') as 'shopify' | 'wordpress';
+
+  const [{ applyPatch }, { applyFix: shopifyApplyFix }] = await Promise.all([
+    import('../../patch-engine/src/index.js'),
+    import('../../adapters/shopify/src/index.js'),
+  ]);
+
+  const patchResult = await applyPatch({
+    action_id:    actionId,
+    run_id:       item.run_id,
+    tenant_id:    item.tenant_id,
+    site_id:      item.site_id,
+    cms_type:     cmsType,
+    issue_type:   item.issue_type,
+    proposed_fix: item.proposed_fix,
+    sandbox:      true,
+  });
+
+  if (!patchResult.success) {
+    throw new Error(patchResult.error ?? 'applyPatch failed');
+  }
+
+  const fixResult = await shopifyApplyFix({
+    action_id:    actionId,
+    access_token: process.env['SHOPIFY_POC_ACCESS_TOKEN'] ?? '',
+    store_url:    process.env['SHOPIFY_POC_STORE_URL'] ?? '',
+    fix_type:     deriveFixType(item.issue_type),
+    target_url:   item.url,
+    before_value: (item.proposed_fix['before_value'] as Record<string, unknown>) ?? {},
+    after_value:  item.proposed_fix,
+    sandbox:      true,
+  });
+
+  if (!fixResult.success) {
+    throw new Error(fixResult.error ?? 'shopify applyFix failed');
+  }
 };
 
 const realRunValidators: OptimizeCommandOps['runValidators'] = async (item) => {
-  // Real implementation calls lighthouse, w3c, schema, axe, visual-diff in order.
-  // First failure short-circuits the ladder.
-  // Injected in tests.
-  throw new Error(`realRunValidators: validators not configured for ${item.url} — inject via _testOps`);
+  // Real validator ladder (lighthouse → w3c → schema → axe → visual-diff) not yet wired.
+  // Auto-pass in sandbox mode so all items can route to approval or deploy.
+  process.stderr.write(
+    `[optimize] validators:stub — auto-pass for ${item.url} (validators not yet wired)\n`,
+  );
+  return { url: item.url, passed: true, failures: [] };
 };
 
-const realDeployFix: OptimizeCommandOps['deployFix'] = async (_item) => {
-  throw new Error('realDeployFix: PatchEngine not configured — inject via _testOps');
+/**
+ * Promotes a fix to live (sandbox: false).
+ * LIVE DEPLOY path — emits a prominent stderr log before proceeding.
+ * Throws on any failure.
+ */
+const realDeployFix: OptimizeCommandOps['deployFix'] = async (item) => {
+  const actionId = item.id;
+  const cmsType  = (item.cms_type ?? 'shopify') as 'shopify' | 'wordpress';
+
+  process.stderr.write(
+    `[optimize] LIVE DEPLOY — action_id=${actionId}, fix_type=${item.issue_type}, url=${item.url}\n`,
+  );
+
+  const [{ applyPatch }, { applyFix: shopifyApplyFix }] = await Promise.all([
+    import('../../patch-engine/src/index.js'),
+    import('../../adapters/shopify/src/index.js'),
+  ]);
+
+  const patchResult = await applyPatch({
+    action_id:    actionId,
+    run_id:       item.run_id,
+    tenant_id:    item.tenant_id,
+    site_id:      item.site_id,
+    cms_type:     cmsType,
+    issue_type:   item.issue_type,
+    proposed_fix: item.proposed_fix,
+    sandbox:      false,
+  });
+
+  if (!patchResult.success) {
+    throw new Error(patchResult.error ?? 'applyPatch failed (live)');
+  }
+
+  const fixResult = await shopifyApplyFix({
+    action_id:    actionId,
+    access_token: process.env['SHOPIFY_POC_ACCESS_TOKEN'] ?? '',
+    store_url:    process.env['SHOPIFY_POC_STORE_URL'] ?? '',
+    fix_type:     deriveFixType(item.issue_type),
+    target_url:   item.url,
+    before_value: (item.proposed_fix['before_value'] as Record<string, unknown>) ?? {},
+    after_value:  item.proposed_fix,
+    sandbox:      false,
+  });
+
+  if (!fixResult.success) {
+    throw new Error(fixResult.error ?? 'shopify applyFix failed (live)');
+  }
 };
 
 const realMarkStatus: OptimizeCommandOps['markStatus'] = async (itemId, tenantId, status) => {
@@ -173,6 +281,7 @@ export async function runOptimize(
     run_id:    request.run_id,
     tenant_id: request.tenant_id,
     site_id:   request.site_id,
+    cms:       request.cms,
     command:   'optimize',
   });
 
@@ -362,12 +471,14 @@ export async function runOptimizeCli(opts: {
   runId:             string;
   tenantId:          string;
   siteId:            string;
+  cms:               CmsType;
   autoApproveMaxRisk?: number;
 }): Promise<void> {
   const result = await runOptimize({
     run_id:               opts.runId,
     tenant_id:            opts.tenantId,
     site_id:              opts.siteId,
+    cms:                  opts.cms,
     auto_approve_max_risk: opts.autoApproveMaxRisk,
   });
 

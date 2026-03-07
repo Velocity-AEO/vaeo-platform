@@ -27,6 +27,7 @@ function baseReq(overrides: Partial<OptimizeRequest> = {}): OptimizeRequest {
     run_id:    RUN_ID,
     tenant_id: TENANT_ID,
     site_id:   SITE_ID,
+    cms:       'shopify',
     ...overrides,
   };
 }
