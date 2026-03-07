@@ -1,0 +1,59 @@
+/**
+ * packages/adapters/ai/src/templates/meta_title.ts
+ *
+ * Versioned prompt template for META_TITLE_MISSING / META_TITLE_DUPLICATE.
+ * Template version is included in every GenerateSuccess response so callers
+ * can trace which prompt version produced a given output.
+ */
+
+export const META_TITLE_TEMPLATE_VERSION = '1.0.0';
+
+export interface MetaTitlePromptInput {
+  page_url:        string;
+  page_title:      string;
+  body_preview:    string;
+  top_keywords:    Array<{ query: string; impressions: number; position: number }>;
+  brand_name:      string;
+  character_limit: number;
+}
+
+export function buildMetaTitlePrompt(input: MetaTitlePromptInput): string {
+  const keywordHint =
+    input.top_keywords.length > 0
+      ? `Top search keywords: ${
+          input.top_keywords
+            .slice(0, 3)
+            .map((k) => `"${k.query}" (${k.impressions} impressions, position ${k.position.toFixed(1)})`)
+            .join(', ')
+        }. Naturally incorporate the most relevant keyword if it fits within the limit.`
+      : 'No keyword data available — focus on clarity and brand recognition.';
+
+  return `You are an expert SEO copywriter writing a meta title tag for a web page.
+
+Page URL: ${input.page_url}
+Page heading / current title: ${input.page_title}
+Brand name: ${input.brand_name}
+Hard character limit: ${input.character_limit}
+
+Page content preview (first 500 chars):
+"""
+${input.body_preview}
+"""
+
+${keywordHint}
+
+Rules:
+- Return ONLY valid JSON — no preamble, no markdown fences, no extra text.
+- "generated_text": the meta title. Must be under ${input.character_limit} characters (count carefully).
+- "confidence_score": float 0.0–1.0 reflecting how much useful context was available.
+  1.0 = rich page content + keyword data
+  0.7–0.9 = decent content, no keywords
+  0.4–0.6 = sparse content or very generic page
+  0.1–0.3 = almost no usable context
+- "reasoning": one sentence explaining your title choice.
+- Include the brand name only if it fits naturally without exceeding the limit.
+- Be specific and compelling — generic titles score lower.
+
+Required JSON shape (no other keys):
+{"generated_text": "...", "confidence_score": 0.0, "reasoning": "..."}`;
+}
