@@ -23,6 +23,36 @@ import type { IssueCategory, ProposedAction } from '../../guardrail/src/index.js
 import { PRIORITY_MAP } from '../../guardrail/src/index.js';
 import { createLogger } from '../../action-log/src/index.js';
 
+// ── Protected route filter ────────────────────────────────────────────────────
+
+/**
+ * Shopify system paths that should never appear in the audit queue.
+ * These are framework-managed routes that operators cannot meaningfully fix.
+ */
+const SHOPIFY_PROTECTED_PATHS = [
+  '/account',
+  '/cart',
+  '/checkout',
+  '/search',
+  '/password',
+  '/challenge',
+  '/customize',
+  '/orders',
+  '/collections/vendors',
+  '/collections/types',
+];
+
+function isProtectedRoute(url: string): boolean {
+  try {
+    const path = new URL(url).pathname;
+    return SHOPIFY_PROTECTED_PATHS.some(
+      (p) => path === p || path.startsWith(p + '/'),
+    );
+  } catch {
+    return false;
+  }
+}
+
 // ── Category mapping ──────────────────────────────────────────────────────────
 
 /**
@@ -254,9 +284,17 @@ export async function runAudit(
       return b.issue.risk_score - a.issue.risk_score;
     });
 
-    // ── Step 5: Build action_queue rows ───────────────────────────────────────
+    // ── Step 5: Filter protected routes, then build action_queue rows ─────────
 
-    const queueRows: ActionQueueRow[] = withPriority.map(({ issue, issueCategory, priority }) => ({
+    const skipped = withPriority.filter(({ issue }) => isProtectedRoute(issue.url));
+    if (skipped.length > 0) {
+      const paths = Array.from(new Set(skipped.map(({ issue }) => new URL(issue.url).pathname)));
+      console.log(`[audit] Skipping ${skipped.length} issues on protected routes:`, paths);
+    }
+
+    const queueReady = withPriority.filter(({ issue }) => !isProtectedRoute(issue.url));
+
+    const queueRows: ActionQueueRow[] = queueReady.map(({ issue, issueCategory, priority }) => ({
       run_id:            request.run_id,
       tenant_id:         request.tenant_id,
       site_id:           request.site_id,
@@ -286,7 +324,7 @@ export async function runAudit(
     // ── Step 7: Build issues_by_priority ─────────────────────────────────────
 
     const issues_by_priority = emptyByPriority();
-    for (const { priority } of withPriority) {
+    for (const { priority } of queueReady) {
       const p = priority as keyof typeof issues_by_priority;
       issues_by_priority[p] = (issues_by_priority[p] ?? 0) + 1;
     }
