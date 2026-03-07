@@ -6,7 +6,7 @@
  * items to approval, and auto-deploys low-risk items.
  *
  * Per-item status transitions:
- *   queued → applyFix → runValidators:
+ *   queued → runValidators → applyFix:
  *     validators fail            → 'failed'       (continue to next item)
  *     applyFix throws            → 'failed'        (continue to next item)
  *     pass + approval_required   → 'pending_approval'
@@ -362,12 +362,59 @@ const realApplyFix: OptimizeCommandOps['applyFix'] = async (item) => {
 };
 
 const realRunValidators: OptimizeCommandOps['runValidators'] = async (item) => {
-  // Real validator ladder (lighthouse → w3c → schema → axe → visual-diff) not yet wired.
-  // Auto-pass in sandbox mode so all items can route to approval or deploy.
-  process.stderr.write(
-    `[optimize] validators:stub — auto-pass for ${item.url} (validators not yet wired)\n`,
-  );
-  return { url: item.url, passed: true, failures: [] };
+  // Fetch schema_blocks from crawl_results for this URL (non-blocking if unavailable)
+  let schemaBlocks: string[] | undefined;
+  try {
+    const { createClient } = await import('@supabase/supabase-js');
+    const { getConfig }    = await import('../../core/config.js');
+    const cfg = getConfig();
+    const db  = createClient(cfg.supabaseUrl, cfg.supabaseServiceKey);
+    const { data } = await db
+      .from('crawl_results')
+      .select('schema_blocks')
+      .eq('run_id', item.run_id)
+      .eq('url', item.url)
+      .limit(1)
+      .maybeSingle();
+    if (data?.['schema_blocks']) {
+      const raw = data['schema_blocks'];
+      schemaBlocks = Array.isArray(raw) ? (raw as unknown[]).map(String) : undefined;
+    }
+  } catch { /* non-blocking — schema validation skipped if unavailable */ }
+
+  const { runValidators } = await import('../../validators/src/index.js');
+  const result = await runValidators({
+    url:            item.url,
+    schema_blocks:  schemaBlocks,
+    run_lighthouse: false, // lighthouse runs separately via PageSpeed API, not in sandbox loop
+  });
+
+  if (!result.passed) {
+    process.stderr.write(
+      `[validator] BLOCKED ${item.url} — failed: ${result.blocked_by.join(', ')}\n`,
+    );
+    // Write error_log + validator_results to action_queue (non-blocking)
+    try {
+      const { createClient } = await import('@supabase/supabase-js');
+      const { getConfig }    = await import('../../core/config.js');
+      const cfg = getConfig();
+      const db  = createClient(cfg.supabaseUrl, cfg.supabaseServiceKey);
+      await db.from('action_queue')
+        .update({
+          error_log:         JSON.stringify(result.blocked_by),
+          validator_results: result,
+          updated_at:        new Date().toISOString(),
+        })
+        .eq('id', item.id)
+        .eq('tenant_id', item.tenant_id);
+    } catch { /* non-blocking */ }
+  }
+
+  return {
+    url:      item.url,
+    passed:   result.passed,
+    failures: result.blocked_by,
+  };
 };
 
 /**
@@ -483,22 +530,20 @@ export async function runOptimize(
   let fixesFailed      = 0;
 
   for (const item of queue) {
-    // Step a: Apply fix in sandbox
-    try {
-      await ops.applyFix(item);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+    // Pre-check: manual-only fixes (e.g. IMG_DIMENSIONS_MISSING without product_id/image_id)
+    // cannot be auto-applied — route directly to pending_approval without hitting the adapter.
+    if (item.proposed_fix['fix_source'] === 'manual') {
       log({
-        stage:    'optimize:item_failed',
-        status:   'error',
-        metadata: { item_id: item.id, url: item.url, issue_type: item.issue_type, reason: `applyFix: ${msg}` },
+        stage:    'optimize:item_pending_approval',
+        status:   'pending',
+        metadata: { item_id: item.id, url: item.url, issue_type: item.issue_type, reason: 'manual fix required — no adapter call' },
       });
-      try { await ops.markStatus(item.id, item.tenant_id, 'failed'); } catch { /* non-blocking */ }
-      fixesFailed++;
+      try { await ops.markStatus(item.id, item.tenant_id, 'pending_approval'); } catch { /* non-blocking */ }
+      pendingApproval++;
       continue;
     }
 
-    // Step b: Run validator ladder
+    // Step a: Run validator ladder (pre-flight before any apply)
     let validation: ValidatorSuiteResult;
     try {
       validation = await ops.runValidators(item);
@@ -514,12 +559,27 @@ export async function runOptimize(
       continue;
     }
 
-    // Step c: Validator failure
+    // Step b: Validator failure — skip apply entirely
     if (!validation.passed) {
       log({
         stage:    'optimize:item_failed',
         status:   'error',
         metadata: { item_id: item.id, url: item.url, issue_type: item.issue_type, failures: validation.failures },
+      });
+      try { await ops.markStatus(item.id, item.tenant_id, 'failed'); } catch { /* non-blocking */ }
+      fixesFailed++;
+      continue;
+    }
+
+    // Step c: Apply fix in sandbox
+    try {
+      await ops.applyFix(item);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      log({
+        stage:    'optimize:item_failed',
+        status:   'error',
+        metadata: { item_id: item.id, url: item.url, issue_type: item.issue_type, reason: `applyFix: ${msg}` },
       });
       try { await ops.markStatus(item.id, item.tenant_id, 'failed'); } catch { /* non-blocking */ }
       fixesFailed++;

@@ -211,6 +211,39 @@ describe('runOptimize — approval_required=true always routes to approval', () 
   });
 });
 
+// ── fix_source='manual' skips adapter call ────────────────────────────────────
+
+describe("runOptimize — fix_source='manual' routes to pending_approval without calling applyFix", () => {
+  it("fix_source='manual' → pending_approval, applyFix NOT called", async () => {
+    let applyCalled = false;
+    const result = await runOptimize(baseReq(), happy({
+      loadQueue: async () => [makeItem({
+        risk_score:       1,
+        approval_required: true,
+        proposed_fix:     { fix_source: 'manual' },
+      })],
+      applyFix: async () => { applyCalled = true; },
+    }));
+    assert.equal(result.fixes_pending_approval, 1);
+    assert.equal(result.fixes_deployed,         0);
+    assert.equal(result.fixes_failed,           0);
+    assert.equal(applyCalled, false, 'should not call applyFix for manual fix');
+  });
+
+  it("fix_source='manual' with throwing applyFix → still pending_approval (not failed)", async () => {
+    const result = await runOptimize(baseReq(), happy({
+      loadQueue: async () => [makeItem({
+        risk_score:       1,
+        approval_required: true,
+        proposed_fix:     { fix_source: 'manual' },
+      })],
+      applyFix: async () => { throw new Error('image_alt fix requires after_value.product_id and after_value.image_id'); },
+    }));
+    assert.equal(result.fixes_pending_approval, 1);
+    assert.equal(result.fixes_failed,           0);
+  });
+});
+
 // ── Validator failure ─────────────────────────────────────────────────────────
 
 describe('runOptimize — validator failure marks item failed and continues', () => {
