@@ -1,563 +1,248 @@
 /**
  * packages/truth-server/src/index.ts
  *
- * Snapshot and diff engine — the platform's source of truth for site state.
+ * Snapshot store for Velocity AEO.
+ * Saves crawl run metadata to site_snapshots and retrieves it
+ * alongside crawl_results for downstream consumers.
  *
- * Three responsibilities:
- *   1. snapshot() — fetch current CMS state and persist it to Supabase (+ R2 for large payloads)
- *   2. diff()     — compare two snapshots field-by-field and return a structured diff
- *   3. restore()  — retrieve and integrity-verify a snapshot for rollback or audit
- *
- * All queries include tenant_id in the WHERE clause — multi-tenant isolation enforced at query level.
- * Supabase RLS provides the second layer of isolation.
- *
- * Never call process.env directly — all credentials come from packages/core/config.ts.
+ * Design rules:
+ *   - Never throws — always returns result with success/found flags
+ *   - Supabase is lazy-initialized via dynamic import of getConfig()
+ *   - Client is injectable for unit tests (_injectSupabase)
  */
 
-import { createHash } from 'node:crypto';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import {
-  S3Client,
-  PutObjectCommand,
-  GetObjectCommand,
-} from '@aws-sdk/client-s3';
-import type {
-  CMSAdapter,
-  ActionLogEvent,
-  CmsType,
-} from '../../../packages/core/types.js';
-// config is loaded lazily in makeSupabaseClient / makeR2Config to avoid loading
-// all env vars (e.g. REDIS_URL) at module initialisation time.
+import { randomUUID } from 'node:crypto';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import type { CrawlResult } from '../../crawler/src/index.js';
 
-// ── Table / storage constants — change here, not in queries ──────────────────
+// ── Types ─────────────────────────────────────────────────────────────────────
 
-const TABLE_SNAPSHOTS = 'site_snapshots' as const;
-const R2_PATH_PREFIX = (tenantId: string, runId: string) =>
-  `${tenantId}/${runId}/snapshot.json`;
+export type { CrawlResult };
 
-/** Snapshot payloads larger than this threshold are offloaded to R2. */
-const R2_SIZE_THRESHOLD_BYTES = 1_000_000; // 1 MB
+export interface SaveSnapshotRequest {
+  run_id:        string;
+  tenant_id:     string;
+  site_id:       string;
+  site_url:      string;
+  cms_type:      string;
+  urls_crawled:  number;
+  crawl_results: CrawlResult[];
+}
 
-// ── Public return types ───────────────────────────────────────────────────────
-
-/** Result returned by snapshot(). */
-export interface SnapshotResult {
+export interface SaveSnapshotResult {
   snapshot_id: string;
-  content_hash: string;
+  run_id:      string;
+  tenant_id:   string;
+  site_id:     string;
+  saved_at:    string;
+  success:     boolean;
+  error?:      string;
 }
 
-/** A single changed field in a diff. */
-export interface DiffChangedField {
-  field: string;
-  before_value: unknown;
-  after_value: unknown;
-}
-
-/** A field that appeared in the after snapshot but not the before. */
-export interface DiffAddedField {
-  field: string;
-  value: unknown;
-}
-
-/** A field that was present in the before snapshot but missing in the after. */
-export interface DiffRemovedField {
-  field: string;
-  previous_value: unknown;
-}
-
-/** Structured diff result returned by diff(). */
-export interface SnapshotDiff {
-  run_id_before: string;
-  run_id_after: string;
-  fields_changed: DiffChangedField[];
-  fields_added: DiffAddedField[];
-  fields_removed: DiffRemovedField[];
-  compared_at: string;
-}
-
-/** Full snapshot row as stored in Supabase. */
-export interface SiteSnapshot {
-  snapshot_id: string;
-  run_id: string;
+export interface LoadSnapshotRequest {
+  run_id:    string;
   tenant_id: string;
-  site_id: string;
-  cms_type: CmsType;
-  snapshot_data: Record<string, unknown>;
-  content_hash: string;
-  created_at: string;
 }
 
-// ── ActionLog writer ──────────────────────────────────────────────────────────
-
-/**
- * Emits an ActionLogEvent to stdout as newline-delimited JSON.
- * The platform log aggregator persists these — the truth-server just emits them.
- */
-function writeLog(
-  overrides: Partial<ActionLogEvent> & Pick<ActionLogEvent, 'run_id' | 'site_id' | 'stage' | 'status'>,
-): void {
-  const event: ActionLogEvent = {
-    tenant_id: '',
-    cms: 'shopify',
-    command: 'truth-server',
-    urls: [],
-    proof_artifacts: [],
-    before_metrics: null,
-    after_metrics: null,
-    ts: new Date().toISOString(),
-    ...overrides,
-  };
-  process.stdout.write(JSON.stringify(event) + '\n');
+export interface LoadSnapshotResult {
+  snapshot_id:   string | null;
+  run_id:        string;
+  tenant_id:     string;
+  site_id:       string | null;
+  site_url:      string | null;
+  cms_type:      string | null;
+  urls_crawled:  number;
+  crawl_results: CrawlResult[];
+  created_at:    string | null;
+  found:         boolean;
+  error?:        string;
 }
 
-// ── Supabase client factory ───────────────────────────────────────────────────
+// ── Injectable dependency ─────────────────────────────────────────────────────
 
-/**
- * Creates a Supabase client using only SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY —
- * does NOT require the full loadConfig() so unrelated env vars (REDIS_URL etc.)
- * need not be present.
- */
-async function makeSupabaseClient(): Promise<SupabaseClient> {
-  const { getConfig } = await import('../../../packages/core/config.js');
-  const cfg = getConfig();
-  return createClient(cfg.supabaseUrl, cfg.supabaseServiceKey, {
-    auth: { persistSession: false },
-  });
+/** undefined = not yet attempted | null = failed / unavailable */
+let _supabaseClient: SupabaseClient | null | undefined;
+
+export function _injectSupabase(client: SupabaseClient | null): void {
+  _supabaseClient = client;
 }
 
-// ── R2 client factory ─────────────────────────────────────────────────────────
-
-interface R2Context {
-  client: S3Client;
-  bucketName: string;
+export function _resetInjections(): void {
+  _supabaseClient = undefined;
 }
 
-/**
- * Creates an AWS S3-compatible client pointing at Cloudflare R2.
- * Uses a dynamic import of config so R2 credentials are read only when needed.
- */
-async function makeR2Config(): Promise<R2Context> {
-  const { config } = await import('../../../packages/core/config.js');
+// ── Supabase lazy init ────────────────────────────────────────────────────────
+
+async function getSupabase(): Promise<SupabaseClient | null> {
+  if (_supabaseClient !== undefined) return _supabaseClient;
+  try {
+    const [{ createClient }, { getConfig }] = await Promise.all([
+      import('@supabase/supabase-js'),
+      import('../../core/src/config.js'),
+    ]);
+    const cfg = getConfig();
+    _supabaseClient = createClient(cfg.supabaseUrl, cfg.supabaseServiceKey);
+    return _supabaseClient;
+  } catch (err) {
+    process.stderr.write(`[truth-server] snapshot:error — init: ${String(err)}\n`);
+    _supabaseClient = null;
+    return null;
+  }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function notFound(req: LoadSnapshotRequest, error?: string): LoadSnapshotResult {
   return {
-    client: new S3Client({
-      region: 'auto',
-      endpoint: config.r2.endpoint,
-      credentials: {
-        accessKeyId: config.r2.accessKeyId,
-        secretAccessKey: config.r2.secretAccessKey,
-      },
-    }),
-    bucketName: config.r2.bucketName,
+    snapshot_id:   null,
+    run_id:        req.run_id,
+    tenant_id:     req.tenant_id,
+    site_id:       null,
+    site_url:      null,
+    cms_type:      null,
+    urls_crawled:  0,
+    crawl_results: [],
+    created_at:    null,
+    found:         false,
+    ...(error ? { error } : {}),
   };
 }
 
-// ── Hashing ───────────────────────────────────────────────────────────────────
-
-/**
- * Computes a deterministic SHA-256 hash of any JSON-serialisable object.
- * Keys are sorted before serialisation so object ordering doesn't affect the hash.
- */
-function hashObject(obj: Record<string, unknown>): string {
-  const stable = JSON.stringify(obj, Object.keys(obj).sort());
-  return createHash('sha256').update(stable, 'utf-8').digest('hex');
+function rowToCrawlResult(row: Record<string, unknown>): CrawlResult {
+  return {
+    url:            String(row['url']            ?? ''),
+    status_code:    Number(row['status_code']    ?? 0),
+    title:          (row['title']     as string)  ?? null,
+    meta_desc:      (row['meta_desc'] as string)  ?? null,
+    h1:             (row['h1']             as string[]) ?? [],
+    h2:             (row['h2']             as string[]) ?? [],
+    images:         (row['images']         as CrawlResult['images'])         ?? [],
+    internal_links: (row['internal_links'] as string[]) ?? [],
+    schema_blocks:  (row['schema_blocks']  as string[]) ?? [],
+    canonical:      (row['canonical'] as string) ?? null,
+    redirect_chain: (row['redirect_chain'] as string[]) ?? [],
+    load_time_ms:   Number(row['load_time_ms'] ?? 0),
+  };
 }
 
-// ── Deep diff ─────────────────────────────────────────────────────────────────
+// ── Exports ───────────────────────────────────────────────────────────────────
 
 /**
- * Recursively walks two plain objects and collects every leaf-level difference.
- * Returns three lists: changed fields, added fields, and removed fields.
- * Nested keys are represented with dot notation (e.g. "pages.gid://shopify/Page/1.title").
+ * Saves a crawl run snapshot to the site_snapshots table.
+ * Never throws — returns success=false with error message on failure.
  */
-function deepDiff(
-  before: Record<string, unknown>,
-  after: Record<string, unknown>,
-  prefix = '',
-): { changed: DiffChangedField[]; added: DiffAddedField[]; removed: DiffRemovedField[] } {
-  const changed: DiffChangedField[] = [];
-  const added: DiffAddedField[] = [];
-  const removed: DiffRemovedField[] = [];
+export async function saveSnapshot(
+  request: SaveSnapshotRequest,
+): Promise<SaveSnapshotResult> {
+  const snapshotId = randomUUID();
+  const savedAt    = new Date().toISOString();
 
-  const allKeys = new Set([...Object.keys(before), ...Object.keys(after)]);
+  const base = {
+    snapshot_id: snapshotId,
+    run_id:      request.run_id,
+    tenant_id:   request.tenant_id,
+    site_id:     request.site_id,
+    saved_at:    savedAt,
+  };
 
-  for (const key of allKeys) {
-    const fullKey = prefix ? `${prefix}.${key}` : key;
-    const inBefore = Object.prototype.hasOwnProperty.call(before, key);
-    const inAfter = Object.prototype.hasOwnProperty.call(after, key);
-
-    if (!inBefore) {
-      added.push({ field: fullKey, value: after[key] });
-      continue;
-    }
-    if (!inAfter) {
-      removed.push({ field: fullKey, previous_value: before[key] });
-      continue;
-    }
-
-    const bVal = before[key];
-    const aVal = after[key];
-
-    // Recurse into nested plain objects — not into arrays or primitives
-    if (
-      bVal !== null && aVal !== null &&
-      typeof bVal === 'object' && typeof aVal === 'object' &&
-      !Array.isArray(bVal) && !Array.isArray(aVal)
-    ) {
-      const nested = deepDiff(
-        bVal as Record<string, unknown>,
-        aVal as Record<string, unknown>,
-        fullKey,
-      );
-      changed.push(...nested.changed);
-      added.push(...nested.added);
-      removed.push(...nested.removed);
-    } else {
-      // Primitive or array — compare by stable JSON representation
-      const bStr = JSON.stringify(bVal);
-      const aStr = JSON.stringify(aVal);
-      if (bStr !== aStr) {
-        changed.push({ field: fullKey, before_value: bVal, after_value: aVal });
-      }
-    }
+  const client = await getSupabase();
+  if (!client) {
+    process.stderr.write(`[truth-server] snapshot:error — Supabase unavailable\n`);
+    return { ...base, success: false, error: 'Supabase unavailable' };
   }
 
-  return { changed, added, removed };
-}
-
-// ── R2 helpers ────────────────────────────────────────────────────────────────
-
-/**
- * Uploads a JSON payload to Cloudflare R2 at {tenantId}/{runId}/snapshot.json.
- * Returns the public path (not a signed URL — access is controlled by RLS + the
- * R2 bucket policy). Throws if the upload fails.
- */
-async function uploadToR2(
-  r2: S3Client,
-  bucketName: string,
-  tenantId: string,
-  runId: string,
-  data: Record<string, unknown>,
-): Promise<string> {
-  const key = R2_PATH_PREFIX(tenantId, runId);
-  const body = JSON.stringify(data);
-
-  await r2.send(new PutObjectCommand({
-    Bucket: bucketName,
-    Key: key,
-    Body: body,
-    ContentType: 'application/json',
-    Metadata: { tenant_id: tenantId, run_id: runId },
-  }));
-
-  return `r2://${bucketName}/${key}`;
-}
-
-/**
- * Downloads and parses a JSON payload from Cloudflare R2 by key path.
- * Throws if the object is missing or unreadable.
- */
-async function downloadFromR2(
-  r2: S3Client,
-  bucketName: string,
-  r2Url: string,
-): Promise<Record<string, unknown>> {
-  // r2Url format: r2://{bucket}/{key}
-  const withoutScheme = r2Url.replace(/^r2:\/\/[^/]+\//, '');
-  const key = withoutScheme;
-
-  const result = await r2.send(new GetObjectCommand({
-    Bucket: bucketName,
-    Key: key,
-  }));
-
-  if (!result.Body) {
-    throw new Error(`[truth-server] R2 object at ${key} has no body`);
-  }
-
-  const text = await result.Body.transformToString('utf-8');
-  return JSON.parse(text) as Record<string, unknown>;
-}
-
-// ── TruthServer ───────────────────────────────────────────────────────────────
-
-/**
- * TruthServer — snapshot, diff, and restore engine.
- *
- * Instantiate with the appropriate CMS adapter for the site being snapshotted.
- * The adapter is swapped at construction time so the truth-server stays CMS-agnostic.
- */
-export class TruthServer {
-  private _supabase: SupabaseClient | undefined;
-  private _r2: R2Context | undefined;
-
-  constructor(private readonly adapter: CMSAdapter) {}
-
-  private async getSupabase(): Promise<SupabaseClient> {
-    if (!this._supabase) this._supabase = await makeSupabaseClient();
-    return this._supabase;
-  }
-
-  private async getR2(): Promise<R2Context> {
-    if (!this._r2) this._r2 = await makeR2Config();
-    return this._r2;
-  }
-
-  /**
-   * Takes a full snapshot of the site's current SEO state by calling fetch_state
-   * on the CMS adapter, then persists the result to Supabase. If the payload
-   * exceeds 1 MB, the raw data is stored in Cloudflare R2 and only the R2 URL
-   * is written to Supabase. Returns the snapshot_id and content_hash.
-   */
-  async snapshot(
-    siteId: string,
-    runId: string,
-    tenantId: string,
-    cmsType: CmsType = 'shopify',
-  ): Promise<SnapshotResult> {
-    writeLog({ run_id: runId, site_id: siteId, stage: 'snapshot:start', status: 'pending' });
-
-    // 1. Fetch current state from the CMS adapter
-    let stateData: Record<string, unknown>;
-    try {
-      stateData = await this.adapter.fetch_state(siteId);
-    } catch (err) {
-      writeLog({ run_id: runId, site_id: siteId, stage: 'snapshot:fetch_state_error', status: 'error' });
-      throw new Error(
-        `[truth-server] snapshot: fetch_state failed for site ${siteId}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-
-    // 2. Compute content hash over the raw state
-    const contentHash = hashObject(stateData);
-
-    // 3. Decide storage: Supabase JSONB for ≤1 MB, R2 for larger
-    const serialised = JSON.stringify(stateData);
-    const byteSize = Buffer.byteLength(serialised, 'utf-8');
-    let snapshotDataForDb: Record<string, unknown>;
-
-    if (byteSize > R2_SIZE_THRESHOLD_BYTES) {
-      // Upload full payload to R2 — throw if upload fails, do not proceed
-      let r2Url: string;
-      try {
-        const r2 = await this.getR2();
-        r2Url = await uploadToR2(r2.client, r2.bucketName, tenantId, runId, stateData);
-      } catch (err) {
-        writeLog({ run_id: runId, site_id: siteId, stage: 'snapshot:r2_upload_error', status: 'error' });
-        throw new Error(
-          `[truth-server] snapshot: R2 upload failed for run ${runId}: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-      // Store R2 reference in Supabase instead of raw payload
-      snapshotDataForDb = {
-        _storage: 'r2',
-        _r2_url: r2Url,
-        _byte_size: byteSize,
-      };
-    } else {
-      snapshotDataForDb = stateData;
-    }
-
-    // 4. Insert row into Supabase — tenant_id always included
-    let snapshotId: string;
-    try {
-      const supabase = await this.getSupabase();
-      const { data, error } = await supabase
-        .from(TABLE_SNAPSHOTS)
-        .insert({
-          run_id: runId,
-          tenant_id: tenantId,
-          site_id: siteId,
-          cms_type: cmsType,
-          snapshot_data: snapshotDataForDb,
-          content_hash: contentHash,
-          // created_at is set by Supabase DEFAULT NOW()
-        })
-        .select('snapshot_id')
-        .single();
-
-      if (error) {
-        throw new Error(error.message);
-      }
-      if (!data) {
-        throw new Error('No row returned after insert');
-      }
-
-      snapshotId = (data as { snapshot_id: string }).snapshot_id;
-    } catch (err) {
-      writeLog({ run_id: runId, site_id: siteId, stage: 'snapshot:db_error', status: 'error' });
-      throw new Error(
-        `[truth-server] snapshot: Supabase insert failed for run ${runId}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-
-    writeLog({
-      run_id: runId,
-      site_id: siteId,
-      stage: 'snapshot:complete',
-      status: 'ok',
-      proof_artifacts: [`supabase://${TABLE_SNAPSHOTS}/${snapshotId}`],
+  try {
+    const { error } = await client.from('site_snapshots').insert({
+      snapshot_id:  snapshotId,
+      run_id:       request.run_id,
+      tenant_id:    request.tenant_id,
+      site_id:      request.site_id,
+      site_url:     request.site_url,
+      cms_type:     request.cms_type,
+      urls_crawled: request.urls_crawled,
+      created_at:   savedAt,
     });
 
-    return { snapshot_id: snapshotId, content_hash: contentHash };
+    if (error) {
+      process.stderr.write(`[truth-server] snapshot:error — ${error.message}\n`);
+      return { ...base, success: false, error: error.message };
+    }
+
+    process.stderr.write(
+      `[truth-server] snapshot:saved — run_id=${request.run_id}, snapshot_id=${snapshotId}\n`,
+    );
+    return { ...base, success: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`[truth-server] snapshot:error — ${msg}\n`);
+    return { ...base, success: false, error: msg };
+  }
+}
+
+/**
+ * Loads snapshot metadata from site_snapshots and per-URL data from
+ * crawl_results. Never throws — returns found=false with error on failure.
+ */
+export async function loadSnapshot(
+  request: LoadSnapshotRequest,
+): Promise<LoadSnapshotResult> {
+  const client = await getSupabase();
+  if (!client) {
+    process.stderr.write(`[truth-server] snapshot:error — Supabase unavailable\n`);
+    return notFound(request, 'Supabase unavailable');
   }
 
-  /**
-   * Retrieves both snapshots from Supabase by run_id, then compares their
-   * snapshot_data field by field — including nested JSONB objects — and returns
-   * a structured diff listing every change, addition, and removal.
-   */
-  async diff(
-    runIdBefore: string,
-    runIdAfter: string,
-    tenantId: string,
-  ): Promise<SnapshotDiff> {
-    writeLog({ run_id: runIdBefore, site_id: '', stage: 'diff:start', status: 'pending' });
+  try {
+    // 1. Fetch snapshot metadata
+    const { data: snap, error: snapErr } = await client
+      .from('site_snapshots')
+      .select('*')
+      .eq('run_id', request.run_id)
+      .eq('tenant_id', request.tenant_id)
+      .single();
 
-    // Fetch both snapshots — both must belong to the same tenant
-    let before: SiteSnapshot;
-    let after: SiteSnapshot;
+    if (snapErr || !snap) {
+      process.stderr.write(`[truth-server] snapshot:not-found — run_id=${request.run_id}\n`);
+      return notFound(request);
+    }
 
-    try {
-      const supabase = await this.getSupabase();
-      const [beforeRes, afterRes] = await Promise.all([
-        supabase
-          .from(TABLE_SNAPSHOTS)
-          .select('*')
-          .eq('run_id', runIdBefore)
-          .eq('tenant_id', tenantId)
-          .single(),
-        supabase
-          .from(TABLE_SNAPSHOTS)
-          .select('*')
-          .eq('run_id', runIdAfter)
-          .eq('tenant_id', tenantId)
-          .single(),
-      ]);
+    // 2. Fetch crawl results for this run
+    const { data: rows, error: rowsErr } = await client
+      .from('crawl_results')
+      .select('*')
+      .eq('run_id', request.run_id)
+      .eq('tenant_id', request.tenant_id);
 
-      if (beforeRes.error) {
-        throw new Error(`Before snapshot (${runIdBefore}): ${beforeRes.error.message}`);
-      }
-      if (afterRes.error) {
-        throw new Error(`After snapshot (${runIdAfter}): ${afterRes.error.message}`);
-      }
-      if (!beforeRes.data || !afterRes.data) {
-        throw new Error('One or both snapshots returned no data');
-      }
-
-      before = beforeRes.data as SiteSnapshot;
-      after = afterRes.data as SiteSnapshot;
-    } catch (err) {
-      writeLog({ run_id: runIdBefore, site_id: '', stage: 'diff:fetch_error', status: 'error' });
-      throw new Error(
-        `[truth-server] diff: failed to fetch snapshots: ${err instanceof Error ? err.message : String(err)}`,
+    if (rowsErr) {
+      process.stderr.write(
+        `[truth-server] snapshot:error — crawl_results: ${rowsErr.message}\n`,
       );
     }
 
-    // Resolve R2-offloaded snapshots before comparing
-    const beforeData = await this.resolveSnapshotData(before);
-    const afterData = await this.resolveSnapshotData(after);
+    const crawlResults: CrawlResult[] = (rows ?? []).map(
+      (row: Record<string, unknown>) => rowToCrawlResult(row),
+    );
 
-    // Deep-compare the two state objects
-    const { changed, added, removed } = deepDiff(beforeData, afterData);
+    process.stderr.write(
+      `[truth-server] snapshot:loaded — run_id=${request.run_id}, urls=${crawlResults.length}\n`,
+    );
 
-    const result: SnapshotDiff = {
-      run_id_before: runIdBefore,
-      run_id_after: runIdAfter,
-      fields_changed: changed,
-      fields_added: added,
-      fields_removed: removed,
-      compared_at: new Date().toISOString(),
+    const s = snap as Record<string, unknown>;
+    return {
+      snapshot_id:   (s['snapshot_id'] as string) ?? null,
+      run_id:        request.run_id,
+      tenant_id:     request.tenant_id,
+      site_id:       (s['site_id']     as string) ?? null,
+      site_url:      (s['site_url']    as string) ?? null,
+      cms_type:      (s['cms_type']    as string) ?? null,
+      urls_crawled:  Number(s['urls_crawled'] ?? 0),
+      crawl_results: crawlResults,
+      created_at:    (s['created_at']  as string) ?? null,
+      found:         true,
     };
-
-    writeLog({
-      run_id: runIdBefore,
-      site_id: before.site_id,
-      stage: 'diff:complete',
-      status: 'ok',
-    });
-
-    return result;
-  }
-
-  /**
-   * Retrieves a snapshot from Supabase by run_id and verifies that its
-   * content_hash still matches the stored data. If the hash does not match,
-   * throws an error — never returns data that may have been tampered with.
-   * Returns the full snapshot_data for use by the rollback process.
-   */
-  async restore(runId: string, tenantId: string): Promise<Record<string, unknown>> {
-    writeLog({ run_id: runId, site_id: '', stage: 'restore:start', status: 'pending' });
-
-    // Fetch snapshot — tenant_id always in WHERE clause
-    let row: SiteSnapshot;
-    try {
-      const supabase = await this.getSupabase();
-      const { data, error } = await supabase
-        .from(TABLE_SNAPSHOTS)
-        .select('*')
-        .eq('run_id', runId)
-        .eq('tenant_id', tenantId)
-        .single();
-
-      if (error) throw new Error(error.message);
-      if (!data) throw new Error('No snapshot found for this run_id and tenant_id');
-
-      row = data as SiteSnapshot;
-    } catch (err) {
-      writeLog({ run_id: runId, site_id: '', stage: 'restore:fetch_error', status: 'error' });
-      throw new Error(
-        `[truth-server] restore: Supabase fetch failed for run ${runId}: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-
-    // Resolve R2-offloaded data if needed
-    const resolvedData = await this.resolveSnapshotData(row);
-
-    // Verify integrity — never return data whose hash doesn't match
-    const computedHash = hashObject(resolvedData);
-    if (computedHash !== row.content_hash) {
-      writeLog({ run_id: runId, site_id: row.site_id, stage: 'restore:hash_mismatch', status: 'error' });
-      throw new Error(
-        `[truth-server] restore: content_hash mismatch for run ${runId}.\n` +
-        `  Stored:   ${row.content_hash}\n` +
-        `  Computed: ${computedHash}\n` +
-        `  The snapshot may have been tampered with. Refusing to return data.`,
-      );
-    }
-
-    writeLog({
-      run_id: runId,
-      site_id: row.site_id,
-      stage: 'restore:complete',
-      status: 'ok',
-      proof_artifacts: [`supabase://${TABLE_SNAPSHOTS}/${row.snapshot_id}`],
-    });
-
-    return resolvedData;
-  }
-
-  /**
-   * If a snapshot row has its data offloaded to R2 (indicated by _storage: 'r2'),
-   * downloads and returns the full payload. Otherwise returns the in-row data directly.
-   */
-  private async resolveSnapshotData(
-    row: SiteSnapshot,
-  ): Promise<Record<string, unknown>> {
-    const data = row.snapshot_data;
-    if (data['_storage'] === 'r2' && typeof data['_r2_url'] === 'string') {
-      try {
-        const r2 = await this.getR2();
-        return await downloadFromR2(r2.client, r2.bucketName, data['_r2_url']);
-      } catch (err) {
-        throw new Error(
-          `[truth-server] resolveSnapshotData: R2 download failed for run ${row.run_id}: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-    }
-    return data;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    process.stderr.write(`[truth-server] snapshot:error — ${msg}\n`);
+    return notFound(request, msg);
   }
 }
-
-// ── Default export ────────────────────────────────────────────────────────────
-
-export default TruthServer;
