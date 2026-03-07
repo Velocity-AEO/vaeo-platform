@@ -146,20 +146,32 @@ export async function getAllSites(): Promise<SiteWithStats[]> {
     }
   }
 
-  // Open action_queue issues per site — used for total count + health score
-  const { data: issueRows } = await db
-    .from('action_queue')
-    .select('site_id, issue_type')
-    .in('site_id', siteIds)
-    .in('execution_status', ['queued', 'pending_approval', 'failed']);
+  // Build reverse map: run_id → site_id (for scoping issues to latest run only)
+  const runIdToSiteId = new Map<string, string>();
+  for (const [siteId, { run_id }] of latestBySite) {
+    runIdToSiteId.set(run_id, siteId);
+  }
+  const latestRunIds = Array.from(runIdToSiteId.keys());
 
+  // Open action_queue issues scoped to the most recent run per site
   const issuesBySite  = new Map<string, number>();
   const issueTypeBySite = new Map<string, Array<{ issue_type: string }>>();
-  for (const row of issueRows ?? []) {
-    issuesBySite.set(row.site_id, (issuesBySite.get(row.site_id) ?? 0) + 1);
-    const arr = issueTypeBySite.get(row.site_id) ?? [];
-    arr.push({ issue_type: row.issue_type });
-    issueTypeBySite.set(row.site_id, arr);
+
+  if (latestRunIds.length > 0) {
+    const { data: issueRows } = await db
+      .from('action_queue')
+      .select('run_id, issue_type')
+      .in('run_id', latestRunIds)
+      .in('execution_status', ['queued', 'pending_approval', 'failed']);
+
+    for (const row of issueRows ?? []) {
+      const siteId = runIdToSiteId.get(row.run_id);
+      if (!siteId) continue;
+      issuesBySite.set(siteId, (issuesBySite.get(siteId) ?? 0) + 1);
+      const arr = issueTypeBySite.get(siteId) ?? [];
+      arr.push({ issue_type: row.issue_type });
+      issueTypeBySite.set(siteId, arr);
+    }
   }
 
   return sites.map((s: Site) => {
