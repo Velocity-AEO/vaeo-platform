@@ -82,11 +82,12 @@ async function getClient(): Promise<SupabaseClient | null> {
   try {
     // Dynamic imports so neither supabase-js nor config errors surface at
     // module-load time — action-log must never crash the calling system.
-    const [{ createClient }, { config }] = await Promise.all([
+    const [{ createClient }, { getConfig }] = await Promise.all([
       import('@supabase/supabase-js'),
       import('../../core/config.js'),
     ]);
-    _client = createClient(config.supabase.url, config.supabase.serviceRoleKey, {
+    const cfg = getConfig();
+    _client = createClient(cfg.supabaseUrl, cfg.supabaseServiceKey, {
       auth: { persistSession: false },
     });
     return _client;
