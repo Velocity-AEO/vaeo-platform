@@ -2,7 +2,8 @@
  * packages/commands/src/crawl.test.ts
  *
  * Tests for runCrawl.
- * All external deps (Supabase lookup, crawler engine, snapshot save) are injected.
+ * All external deps (Supabase lookup, crawler engine) are injected.
+ * snapshot_id === run_id — no separate crawl_snapshots table.
  */
 
 import { describe, it } from 'node:test';
@@ -19,11 +20,9 @@ import {
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
 const FIXED_UUID   = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
-const SNAPSHOT_ID  = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const UUID_V4_RE   = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const SHOPIFY_SITE: SiteLookup = { cms_type: 'shopify', site_url: 'https://mystore.myshopify.com' };
-const WP_SITE:      SiteLookup = { cms_type: 'wordpress', site_url: 'https://mysite.com' };
 
 function baseReq(overrides: Partial<CrawlRequest> = {}): CrawlRequest {
   return {
@@ -48,10 +47,9 @@ function engineResult(urlsCrawled: number, urlsFailed = 0): EngineResult {
 /** Happy-path ops. */
 function happy(overrides: Partial<CrawlCommandOps> = {}): Partial<CrawlCommandOps> {
   return {
-    lookupSite:   async () => SHOPIFY_SITE,
-    runCrawl:     async () => engineResult(100),
-    saveSnapshot: async () => SNAPSHOT_ID,
-    generateId:   () => FIXED_UUID,
+    lookupSite: async () => SHOPIFY_SITE,
+    runCrawl:   async () => engineResult(100),
+    generateId: () => FIXED_UUID,
     ...overrides,
   };
 }
@@ -84,7 +82,8 @@ describe('runCrawl — successful crawl returns status=completed with run_id', (
     assert.equal(result.site_id,      'site-uuid-001');
     assert.equal(result.tenant_id,    'tenant-uuid-001');
     assert.equal(result.urls_crawled, 100);
-    assert.equal(result.snapshot_id,  SNAPSHOT_ID);
+    // snapshot_id === run_id (no separate crawl_snapshots table)
+    assert.equal(result.snapshot_id,  FIXED_UUID);
     assert.equal(result.error,        undefined);
   });
 
@@ -119,21 +118,6 @@ describe('runCrawl — successful crawl returns status=completed with run_id', (
     assert.ok(capturedOpts);
     assert.equal(capturedOpts.max_urls,  2000);
     assert.equal(capturedOpts.max_depth, 3);
-  });
-
-  it('calls saveSnapshot with correct args', async () => {
-    let savedArgs: Parameters<CrawlCommandOps['saveSnapshot']>[0] | null = null;
-    await runCrawl(baseReq(), happy({
-      saveSnapshot: async (a) => { savedArgs = a; return SNAPSHOT_ID; },
-    }));
-    assert.ok(savedArgs);
-    assert.equal(savedArgs.run_id,       FIXED_UUID);
-    assert.equal(savedArgs.tenant_id,    'tenant-uuid-001');
-    assert.equal(savedArgs.site_id,      'site-uuid-001');
-    assert.equal(savedArgs.cms_type,     'shopify');
-    assert.equal(savedArgs.urls_crawled, 100);
-    assert.equal(savedArgs.urls_failed,  0);
-    assert.equal(savedArgs.status,       'completed');
   });
 
   it('prefixes bare hostname site_url with https://', async () => {
@@ -229,35 +213,13 @@ describe('runCrawl — crawler failure returns status=failed without throwing', 
   });
 });
 
-// ── runCrawl — snapshot failure is non-blocking ───────────────────────────────
-
-describe('runCrawl — snapshot save failure is non-blocking', () => {
-  it('returns status=completed even when saveSnapshot throws', async () => {
-    const result = await runCrawl(baseReq(), happy({
-      saveSnapshot: async () => { throw new Error('crawl_snapshots insert failed'); },
-    }));
-    assert.equal(result.status,      'completed');
-    assert.equal(result.snapshot_id, ''); // empty but not throwing
-    assert.equal(result.error,       undefined);
-  });
-
-  it('does not throw when saveSnapshot throws', async () => {
-    await assert.doesNotReject(() =>
-      runCrawl(baseReq(), happy({
-        saveSnapshot: async () => { throw new Error('timeout'); },
-      })),
-    );
-  });
-});
-
 // ── runCrawl — run_id is UUID v4 ──────────────────────────────────────────────
 
 describe('runCrawl — run_id is a valid UUID v4', () => {
   it('generates a UUID v4 when generateId is not injected', async () => {
     const result = await runCrawl(baseReq(), {
-      lookupSite:   async () => SHOPIFY_SITE,
-      runCrawl:     async () => engineResult(10),
-      saveSnapshot: async () => SNAPSHOT_ID,
+      lookupSite: async () => SHOPIFY_SITE,
+      runCrawl:   async () => engineResult(10),
       // generateId intentionally omitted → uses real crypto.randomUUID()
     });
     assert.match(result.run_id, UUID_V4_RE);
@@ -265,15 +227,19 @@ describe('runCrawl — run_id is a valid UUID v4', () => {
 
   it('each runCrawl call generates a unique run_id', async () => {
     const ops: Partial<CrawlCommandOps> = {
-      lookupSite:   async () => SHOPIFY_SITE,
-      runCrawl:     async () => engineResult(10),
-      saveSnapshot: async () => SNAPSHOT_ID,
+      lookupSite: async () => SHOPIFY_SITE,
+      runCrawl:   async () => engineResult(10),
     };
     const [r1, r2] = await Promise.all([
       runCrawl(baseReq(), ops),
       runCrawl(baseReq(), ops),
     ]);
     assert.notEqual(r1.run_id, r2.run_id);
+  });
+
+  it('snapshot_id equals run_id', async () => {
+    const result = await runCrawl(baseReq(), happy());
+    assert.equal(result.snapshot_id, result.run_id);
   });
 });
 

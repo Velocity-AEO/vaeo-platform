@@ -66,25 +66,12 @@ export interface SiteLookup {
   site_url: string;
 }
 
-export interface SnapshotArgs {
-  run_id:       string;
-  tenant_id:    string;
-  site_id:      string;
-  cms_type:     CmsType;
-  urls_crawled: number;
-  urls_failed:  number;
-  started_at:   string;
-  completed_at: string;
-  status:       'completed' | 'failed' | 'partial';
-}
-
 // ── Injectable ops ─────────────────────────────────────────────────────────────
 
 export interface CrawlCommandOps {
-  lookupSite:   (site_id: string, tenant_id: string) => Promise<SiteLookup | null>;
-  runCrawl:     (opts: EngineOptions)                 => Promise<EngineResult>;
-  saveSnapshot: (args: SnapshotArgs)                  => Promise<string>;
-  generateId:   ()                                    => string;
+  lookupSite: (site_id: string, tenant_id: string) => Promise<SiteLookup | null>;
+  runCrawl:   (opts: EngineOptions)                 => Promise<EngineResult>;
+  generateId: ()                                    => string;
 }
 
 // ── Real implementations ───────────────────────────────────────────────────────
@@ -113,40 +100,11 @@ async function realLookupSite(
   }
 }
 
-async function realSaveSnapshot(args: SnapshotArgs): Promise<string> {
-  const { getConfig }    = await import('../../core/config.js');
-  const { createClient } = await import('@supabase/supabase-js');
-  const cfg    = getConfig();
-  const client = createClient(cfg.supabaseUrl, cfg.supabaseServiceKey, {
-    auth: { persistSession: false },
-  });
-  const { data, error } = await client
-    .from('crawl_snapshots')
-    .insert({
-      run_id:       args.run_id,
-      tenant_id:    args.tenant_id,
-      site_id:      args.site_id,
-      cms_type:     args.cms_type,
-      urls_crawled: args.urls_crawled,
-      urls_failed:  args.urls_failed,
-      started_at:   args.started_at,
-      completed_at: args.completed_at,
-      status:       args.status,
-    })
-    .select('snapshot_id')
-    .single();
-  if (error || !data) {
-    throw new Error(`crawl_snapshots insert failed: ${error?.message ?? 'no data returned'}`);
-  }
-  return (data as { snapshot_id: string }).snapshot_id;
-}
-
 function defaultOps(): CrawlCommandOps {
   return {
-    lookupSite:   realLookupSite,
-    runCrawl:     engineCrawl,
-    saveSnapshot: realSaveSnapshot,
-    generateId:   () => randomUUID(),
+    lookupSite: realLookupSite,
+    runCrawl:   engineCrawl,
+    generateId: () => randomUUID(),
   };
 }
 
@@ -266,33 +224,8 @@ export async function runCrawl(
   const completedAt = new Date().toISOString();
   const status      = deriveStatus(engineResult.urls_crawled, engineResult.urls_failed);
 
-  // ── 5. Save snapshot (non-blocking on failure) ─────────────────────────────
-  let snapshotId = '';
-  try {
-    snapshotId = await ops.saveSnapshot({
-      run_id:       runId,
-      tenant_id:    request.tenant_id,
-      site_id:      request.site_id,
-      cms_type:     site.cms_type,
-      urls_crawled: engineResult.urls_crawled,
-      urls_failed:  engineResult.urls_failed,
-      started_at:   startedAt,
-      completed_at: completedAt,
-      status,
-    });
-  } catch (err) {
-    // Crawl data is safe in crawl_results — log but do not fail the run
-    writeLog({
-      run_id:    runId,
-      tenant_id: request.tenant_id,
-      site_id:   request.site_id,
-      cms:       site.cms_type,
-      command:   'crawl',
-      stage:     'crawl:snapshot_error',
-      status:    'failed',
-      error:     err instanceof Error ? err.message : String(err),
-    });
-  }
+  // ── 5. snapshot_id — crawl_results are keyed by run_id; use it as stable ref
+  const snapshotId = runId;
 
   // ── 6. Write ActionLog: crawl:complete ─────────────────────────────────────
   writeLog({
