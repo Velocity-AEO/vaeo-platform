@@ -49,35 +49,23 @@ export async function getDashboardStats(): Promise<DashboardStats> {
 // ── Recent / all runs ─────────────────────────────────────────────────────────
 
 /**
- * Returns runs derived from action_log stage='crawl:complete' entries.
- * Each run is the most-recent action_log entry for that run_id.
+ * Returns the most recent runs from action_log stage='crawl:complete'.
+ * crawl:complete fires exactly once per run, so no deduplication needed.
  */
 export async function getRecentRuns(limit = 20): Promise<RunSummary[]> {
   const db = createServerClient();
 
-  // Overfetch so we can deduplicate by run_id
   const { data: logs } = await db
     .from('action_log')
     .select('run_id, site_id, cms_type, status, ts')
     .eq('stage', 'crawl:complete')
     .order('ts', { ascending: false })
-    .limit(limit * 5);
+    .limit(limit);
 
   if (!logs?.length) return [];
 
-  // Deduplicate — keep first (most recent) entry per run_id
-  const seen = new Set<string>();
-  const deduped: typeof logs = [];
-  for (const log of logs) {
-    if (!seen.has(log.run_id)) {
-      seen.add(log.run_id);
-      deduped.push(log);
-      if (deduped.length >= limit) break;
-    }
-  }
-
-  const siteIds = Array.from(new Set(deduped.map(l => l.site_id))).filter(Boolean);
-  const runIds  = deduped.map(l => l.run_id);
+  const siteIds = Array.from(new Set(logs.map(l => l.site_id))).filter(Boolean);
+  const runIds  = logs.map(l => l.run_id);
 
   const [sitesRes, crawlRes, fixRes] = await Promise.all([
     db.from('sites').select('site_id, site_url, cms_type').in('site_id', siteIds),
@@ -99,9 +87,8 @@ export async function getRecentRuns(limit = 20): Promise<RunSummary[]> {
     fixesByRun.set(r.run_id, (fixesByRun.get(r.run_id) ?? 0) + 1);
   }
 
-  return deduped.map(log => {
-    const site = siteMap.get(log.site_id);
-    // Map action_log status ('ok' -> 'completed') for StatusBadge
+  return logs.map(log => {
+    const site   = siteMap.get(log.site_id);
     const status = log.status === 'ok' ? 'completed' : (log.status ?? 'partial');
     return {
       run_id:         log.run_id,
