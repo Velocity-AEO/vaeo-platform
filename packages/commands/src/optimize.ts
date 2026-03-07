@@ -129,19 +129,19 @@ function deriveFixType(issueType: string): ShopifyFixRequest['fix_type'] {
 // ── Real ops ──────────────────────────────────────────────────────────────────
 
 /**
- * Applies a fix in sandbox mode:
- *   1. applyPatch() — stores rollback manifest, calls patch-engine adapter stub
- *   2. shopify applyFix() — MVP stub (real Shopify Admin API write in v2)
- * Throws on any failure so runOptimize can count it as failed.
+ * Dispatch applyFix to the correct CMS adapter based on cms_type.
+ * Shopify: SHOPIFY_POC_ACCESS_TOKEN + SHOPIFY_STORE_URL
+ * WordPress: WP_POC_URL + WP_POC_USERNAME + WP_POC_APP_PASSWORD
  */
-const realApplyFix: OptimizeCommandOps['applyFix'] = async (item) => {
+async function dispatchAdapterFix(
+  item: ActionQueueItem,
+  sandbox: boolean,
+): Promise<void> {
   const actionId = item.id;
   const cmsType  = (item.cms_type ?? 'shopify') as 'shopify' | 'wordpress';
+  const fixType  = deriveFixType(item.issue_type);
 
-  const [{ applyPatch }, { applyFix: shopifyApplyFix }] = await Promise.all([
-    import('../../patch-engine/src/index.js'),
-    import('../../adapters/shopify/src/index.js'),
-  ]);
+  const { applyPatch } = await import('../../patch-engine/src/index.js');
 
   const patchResult = await applyPatch({
     action_id:    actionId,
@@ -151,27 +151,66 @@ const realApplyFix: OptimizeCommandOps['applyFix'] = async (item) => {
     cms_type:     cmsType,
     issue_type:   item.issue_type,
     proposed_fix: item.proposed_fix,
-    sandbox:      true,
+    sandbox,
   });
 
   if (!patchResult.success) {
     throw new Error(patchResult.error ?? 'applyPatch failed');
   }
 
-  const fixResult = await shopifyApplyFix({
-    action_id:    actionId,
-    access_token: process.env['SHOPIFY_POC_ACCESS_TOKEN'] ?? '',
-    store_url:    process.env['SHOPIFY_POC_STORE_URL'] ?? '',
-    fix_type:     deriveFixType(item.issue_type),
-    target_url:   item.url,
-    before_value: (item.proposed_fix['before_value'] as Record<string, unknown>) ?? {},
-    after_value:  item.proposed_fix,
-    sandbox:      true,
-  });
-
-  if (!fixResult.success) {
-    throw new Error(fixResult.error ?? 'shopify applyFix failed');
+  if (cmsType === 'wordpress') {
+    const { applyFix: wpApplyFix } = await import('../../adapters/wordpress/src/index.js');
+    const fixResult = await wpApplyFix({
+      action_id:    actionId,
+      site_url:     process.env['WP_POC_URL'] ?? '',
+      username:     process.env['WP_POC_USERNAME'] ?? '',
+      app_password: process.env['WP_POC_APP_PASSWORD'] ?? '',
+      fix_type:     fixType as 'meta_title' | 'meta_description' | 'h1' | 'schema' | 'redirect',
+      target_url:   item.url,
+      before_value: (item.proposed_fix['before_value'] as Record<string, unknown>) ?? {},
+      after_value:  item.proposed_fix,
+    });
+    if (!fixResult.success) {
+      throw new Error(fixResult.error ?? 'wordpress applyFix failed');
+    }
+  } else {
+    const { applyFix: shopifyApplyFix } = await import('../../adapters/shopify/src/index.js');
+    // SHOPIFY_ADMIN_DOMAIN = myshopify.com domain for Admin API.
+    // Falls back to SHOPIFY_STORE_URL if it IS a myshopify.com domain;
+    // otherwise POC default (cococabanalife.com routes to hautedoorliving.myshopify.com).
+    const adminDomainEnv = process.env['SHOPIFY_ADMIN_DOMAIN'] ?? '';
+    let storeUrl: string;
+    if (adminDomainEnv) {
+      storeUrl = adminDomainEnv.replace(/^https?:\/\//, '').replace(/\/$/, '');
+    } else {
+      const raw = (process.env['SHOPIFY_STORE_URL'] ?? process.env['SHOPIFY_POC_STORE_URL'] ?? '')
+        .replace(/^https?:\/\//, '').replace(/\/$/, '');
+      storeUrl = raw.includes('.myshopify.com') ? raw : 'hautedoorliving.myshopify.com';
+    }
+    const fixResult = await shopifyApplyFix({
+      action_id:    actionId,
+      access_token: process.env['SHOPIFY_POC_ACCESS_TOKEN'] ?? '',
+      store_url:    storeUrl,
+      fix_type:     fixType,
+      target_url:   item.url,
+      before_value: (item.proposed_fix['before_value'] as Record<string, unknown>) ?? {},
+      after_value:  item.proposed_fix,
+      sandbox,
+    });
+    if (!fixResult.success) {
+      throw new Error(fixResult.error ?? 'shopify applyFix failed');
+    }
   }
+}
+
+/**
+ * Applies a fix in sandbox mode:
+ *   1. applyPatch() — stores rollback manifest, calls patch-engine adapter stub
+ *   2. CMS-routed applyFix() — Shopify or WordPress based on cms_type
+ * Throws on any failure so runOptimize can count it as failed.
+ */
+const realApplyFix: OptimizeCommandOps['applyFix'] = async (item) => {
+  await dispatchAdapterFix(item, true);
 };
 
 const realRunValidators: OptimizeCommandOps['runValidators'] = async (item) => {
@@ -189,47 +228,10 @@ const realRunValidators: OptimizeCommandOps['runValidators'] = async (item) => {
  * Throws on any failure.
  */
 const realDeployFix: OptimizeCommandOps['deployFix'] = async (item) => {
-  const actionId = item.id;
-  const cmsType  = (item.cms_type ?? 'shopify') as 'shopify' | 'wordpress';
-
   process.stderr.write(
-    `[optimize] LIVE DEPLOY — action_id=${actionId}, fix_type=${item.issue_type}, url=${item.url}\n`,
+    `[optimize] LIVE DEPLOY — action_id=${item.id}, fix_type=${item.issue_type}, url=${item.url}\n`,
   );
-
-  const [{ applyPatch }, { applyFix: shopifyApplyFix }] = await Promise.all([
-    import('../../patch-engine/src/index.js'),
-    import('../../adapters/shopify/src/index.js'),
-  ]);
-
-  const patchResult = await applyPatch({
-    action_id:    actionId,
-    run_id:       item.run_id,
-    tenant_id:    item.tenant_id,
-    site_id:      item.site_id,
-    cms_type:     cmsType,
-    issue_type:   item.issue_type,
-    proposed_fix: item.proposed_fix,
-    sandbox:      false,
-  });
-
-  if (!patchResult.success) {
-    throw new Error(patchResult.error ?? 'applyPatch failed (live)');
-  }
-
-  const fixResult = await shopifyApplyFix({
-    action_id:    actionId,
-    access_token: process.env['SHOPIFY_POC_ACCESS_TOKEN'] ?? '',
-    store_url:    process.env['SHOPIFY_POC_STORE_URL'] ?? '',
-    fix_type:     deriveFixType(item.issue_type),
-    target_url:   item.url,
-    before_value: (item.proposed_fix['before_value'] as Record<string, unknown>) ?? {},
-    after_value:  item.proposed_fix,
-    sandbox:      false,
-  });
-
-  if (!fixResult.success) {
-    throw new Error(fixResult.error ?? 'shopify applyFix failed (live)');
-  }
+  await dispatchAdapterFix(item, false);
 };
 
 const realMarkStatus: OptimizeCommandOps['markStatus'] = async (itemId, tenantId, status) => {
