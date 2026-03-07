@@ -1,18 +1,19 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
-import { getRunActions, getRunSnapshot } from '@/lib/queries';
+import { getRunSummary, getRunActions } from '@/lib/queries';
 import StatusBadge from '@/components/StatusBadge';
 import ActionQueueTable from './ActionQueueTable';
 
 export default async function RunDetailPage({ params }: { params: { run_id: string } }) {
   const [snap, actions] = await Promise.all([
-    getRunSnapshot(params.run_id),
+    getRunSummary(params.run_id),
     getRunActions(params.run_id),
   ]);
 
   if (!snap) notFound();
 
-  const tenantId = snap.tenant_id ?? '';
+  // Derive tenant_id from action_queue rows (run detail page only)
+  const tenantId = actions[0]?.tenant_id ?? '';
 
   const counts = actions.reduce<Record<string, number>>((acc, a) => {
     acc[a.execution_status] = (acc[a.execution_status] ?? 0) + 1;
@@ -22,13 +23,14 @@ export default async function RunDetailPage({ params }: { params: { run_id: stri
   return (
     <>
       <div className="mb-6">
-        <Link href="/" className="text-xs text-slate-400 hover:text-slate-600">← Dashboard</Link>
-        <h1 className="text-xl font-semibold mt-1">{snap.site_id}</h1>
+        <Link href="/runs" className="text-xs text-slate-400 hover:text-slate-600">← Runs</Link>
+        <h1 className="text-xl font-semibold mt-1">{snap.site_url}</h1>
         <div className="flex items-center gap-3 mt-1 text-xs text-slate-500">
           <span>Run: <code className="font-mono bg-slate-100 px-1 rounded">{snap.run_id}</code></span>
           <StatusBadge status={snap.status} size="sm" />
           <span>{new Date(snap.started_at).toLocaleString()}</span>
           {snap.urls_crawled != null && <span>{snap.urls_crawled} URLs crawled</span>}
+          {snap.fixes_deployed > 0 && <span>{snap.fixes_deployed} deployed</span>}
         </div>
       </div>
 

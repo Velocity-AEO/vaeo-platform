@@ -4,7 +4,7 @@ const NAV = [
   { href: '/',      label: 'Dashboard' },
   { href: '/runs',  label: 'Runs'      },
   { href: '/sites', label: 'Sites'     },
-  { href: '/queue', label: 'Approval Queue' },
+  { href: '/queue', label: 'Command Center' },
 ];
 
 export default function Header() {

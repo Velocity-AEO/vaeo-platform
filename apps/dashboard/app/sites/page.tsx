@@ -13,6 +13,7 @@ export default async function SitesPage() {
             <tr className="bg-slate-50 text-left text-xs text-slate-500 uppercase tracking-wide">
               <th className="px-5 py-3 font-medium">Site</th>
               <th className="px-5 py-3 font-medium">CMS</th>
+              <th className="px-5 py-3 font-medium text-right">Issues</th>
               <th className="px-5 py-3 font-medium">Last run</th>
               <th className="px-5 py-3 font-medium">Added</th>
             </tr>
@@ -20,7 +21,7 @@ export default async function SitesPage() {
           <tbody className="divide-y divide-slate-100">
             {sites.length === 0 && (
               <tr>
-                <td colSpan={4} className="px-5 py-8 text-center text-slate-400 text-xs">
+                <td colSpan={5} className="px-5 py-8 text-center text-slate-400 text-xs">
                   No sites registered.
                 </td>
               </tr>
@@ -37,6 +38,15 @@ export default async function SitesPage() {
                   )}
                 </td>
                 <td className="px-5 py-3 text-slate-500 uppercase text-xs">{s.cms_type}</td>
+                <td className="px-5 py-3 text-right tabular-nums text-xs">
+                  {s.total_issues > 0 ? (
+                    <Link href="/queue" className="text-blue-600 hover:underline font-medium">
+                      {s.total_issues}
+                    </Link>
+                  ) : (
+                    <span className="text-slate-400">—</span>
+                  )}
+                </td>
                 <td className="px-5 py-3 text-xs text-slate-400">
                   {s.last_run_at ? new Date(s.last_run_at).toLocaleString() : '—'}
                 </td>

@@ -3,12 +3,14 @@ export type CmsType = 'shopify' | 'wordpress';
 export type ExecutionStatus =
   | 'queued'
   | 'deployed'
-  | 'pending_approval'
   | 'failed'
   | 'rolled_back'
   | 'regression_detected'
   | 'rollback_failed'
-  | 'in_progress';
+  | 'in_progress'
+  | 'pending_approval';
+
+// ── Live DB types (matches actual Supabase schema) ─────────────────────────────
 
 export interface Site {
   site_id:     string;
@@ -19,42 +21,41 @@ export interface Site {
   created_at:  string;
 }
 
-export interface CrawlSnapshot {
-  snapshot_id:  string;
-  run_id:       string;
-  tenant_id:    string;
-  site_id:      string;
-  cms_type:     CmsType;
-  urls_crawled: number;
-  urls_failed:  number;
-  started_at:   string;
-  completed_at: string;
-  status:       'completed' | 'failed' | 'partial';
-  created_at:   string;
-}
-
+/** Matches action_queue live schema columns */
 export interface ActionQueueRow {
   id:                string;
   run_id:            string;
   tenant_id:         string;
   site_id:           string;
+  cms_type?:         string;
   issue_type:        string;
   url:               string;
   risk_score:        number;
   priority:          number;
-  category:          string;
   proposed_fix:      Record<string, unknown>;
   approval_required: boolean;
-  auto_deploy:       boolean;
+  rollback_manifest: Record<string, unknown> | null;
   execution_status:  ExecutionStatus;
   created_at:        string;
   updated_at:        string;
 }
 
+/** action_queue row enriched with site_url for display */
+export interface CommandCenterRow extends ActionQueueRow {
+  site_url: string;
+}
+
+export interface CommandCenterStats {
+  pending_approval: number;
+  deployed:         number;
+  rolled_back:      number;
+  failed:           number;
+}
+
 export interface RunSummary {
   run_id:         string;
   site_url:       string;
-  cms_type:       CmsType;
+  cms_type:       string;
   status:         string;
   urls_crawled:   number;
   fixes_deployed: number;
@@ -67,4 +68,10 @@ export interface DashboardStats {
   fixes_deployed_today:   number;
   fixes_pending_approval: number;
   active_regressions:     number;
+}
+
+export interface SiteWithStats extends Site {
+  last_run_at:  string | null;
+  last_run_id:  string | null;
+  total_issues: number;
 }
