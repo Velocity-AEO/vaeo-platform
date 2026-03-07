@@ -110,6 +110,92 @@ const realLoadQueue: OptimizeCommandOps['loadQueue'] = async (runId, tenantId) =
   return (data ?? []) as ActionQueueItem[];
 };
 
+// ── AI content generation ─────────────────────────────────────────────────────
+
+/** Issue types that require AI-generated text before the CMS adapter runs. */
+const AI_ISSUE_TYPES = new Set([
+  'META_TITLE_MISSING',
+  'META_TITLE_DUPLICATE',
+  'META_DESC_MISSING',
+  'META_DESC_DUPLICATE',
+  'IMG_ALT_MISSING',
+]);
+
+export function needsAiGeneration(issueType: string): boolean {
+  return AI_ISSUE_TYPES.has(issueType);
+}
+
+function characterLimitFor(issueType: string): number {
+  if (issueType.startsWith('META_TITLE')) return 60;
+  if (issueType.startsWith('META_DESC'))  return 155;
+  return 125; // IMG_ALT_MISSING
+}
+
+/**
+ * Derives a human-readable brand name from the page URL.
+ * Checks VAEO_BRAND_NAME env var first; falls back to capitalised domain segment.
+ * e.g. cococabanalife.com → 'Cococabanalife' (good enough for AI hint)
+ */
+function deriveBrandName(url: string): string {
+  const override = process.env['VAEO_BRAND_NAME'];
+  if (override) return override;
+  try {
+    const hostname = new URL(url).hostname.replace(/^www\./, '');
+    const namePart = hostname.split('.')[0] ?? hostname;
+    return namePart.charAt(0).toUpperCase() + namePart.slice(1);
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Writes AI generation results back to the action_queue row (non-throwing).
+ * Updates proposed_fix JSONB and optionally sets approval_required=true.
+ */
+async function patchQueueItemAiResult(
+  itemId:          string,
+  tenantId:        string,
+  patchedFix:      Record<string, unknown>,
+  approvalRequired?: boolean,
+): Promise<void> {
+  try {
+    const { createClient } = await import('@supabase/supabase-js');
+    const { getConfig }    = await import('../../core/config.js');
+    const cfg = getConfig();
+    const db  = createClient(cfg.supabaseUrl, cfg.supabaseServiceKey);
+    const update: Record<string, unknown> = {
+      proposed_fix: patchedFix,
+      updated_at:   new Date().toISOString(),
+    };
+    if (approvalRequired !== undefined) update['approval_required'] = approvalRequired;
+    const { error } = await db
+      .from('action_queue')
+      .update(update)
+      .eq('id', itemId)
+      .eq('tenant_id', tenantId);
+    if (error) {
+      process.stderr.write(`[ai] Supabase patch failed for ${itemId}: ${error.message}\n`);
+    }
+  } catch (err) {
+    process.stderr.write(`[ai] Supabase patch threw for ${itemId}: ${String(err)}\n`);
+  }
+}
+
+/** Injectable type matching generateContent from @vaeo/ai-adapter. */
+type AiGenerateFn = (
+  input: {
+    fix_type: string;
+    [k: string]: unknown;
+  },
+) => Promise<{
+  success:          boolean;
+  generated_text?:  string;
+  confidence_score?: number;
+  reasoning?:       string;
+  low_confidence?:  boolean;
+  error?:           string;
+}>;
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /**
@@ -132,14 +218,76 @@ function deriveFixType(issueType: string): ShopifyFixRequest['fix_type'] {
  * Dispatch applyFix to the correct CMS adapter based on cms_type.
  * Shopify: SHOPIFY_POC_ACCESS_TOKEN + SHOPIFY_STORE_URL
  * WordPress: WP_POC_URL + WP_POC_USERNAME + WP_POC_APP_PASSWORD
+ *
+ * If the issue type requires AI content generation (META_TITLE_*, META_DESC_*,
+ * IMG_ALT_MISSING) and proposed_fix.generated_text is not already set, runs
+ * generateContent() first and writes the result back to Supabase before
+ * handing off to the CMS adapter.
+ *
+ * _aiGenerate is injectable for unit tests; defaults to the real adapter.
  */
-async function dispatchAdapterFix(
-  item: ActionQueueItem,
-  sandbox: boolean,
+export async function dispatchAdapterFix(
+  item:         ActionQueueItem,
+  sandbox:      boolean,
+  _aiGenerate?: AiGenerateFn,
 ): Promise<void> {
   const actionId = item.id;
   const cmsType  = (item.cms_type ?? 'shopify') as 'shopify' | 'wordpress';
   const fixType  = deriveFixType(item.issue_type);
+
+  // ── AI content generation (guardrail-first, spec Section 7) ─────────────────
+  if (needsAiGeneration(item.issue_type) && !item.proposed_fix['generated_text']) {
+    // Resolve AI function — real adapter or injected stub
+    const generateContent: AiGenerateFn = _aiGenerate ?? (
+      async (input) => {
+        const mod = await import('../../adapters/ai/src/index.js');
+        return mod.generateContent(input as Parameters<typeof mod.generateContent>[0]);
+      }
+    );
+
+    // Build type-safe input for this issue type
+    let aiInput: Record<string, unknown>;
+    if (item.issue_type === 'IMG_ALT_MISSING') {
+      aiInput = {
+        fix_type:         item.issue_type,
+        image_src:        String(item.proposed_fix['image_src'] ?? item.url),
+        surrounding_text: String(item.proposed_fix['surrounding_text'] ?? ''),
+        page_title:       String(item.proposed_fix['page_title'] ?? ''),
+        character_limit:  characterLimitFor(item.issue_type),
+      };
+    } else {
+      aiInput = {
+        fix_type:        item.issue_type,
+        page_url:        item.url,
+        page_title:      String(item.proposed_fix['current_title'] ?? ''),
+        body_preview:    String(item.proposed_fix['body_preview'] ?? ''),
+        top_keywords:    (item.proposed_fix['top_keywords'] as unknown[]) ?? [],
+        brand_name:      deriveBrandName(item.url),
+        character_limit: characterLimitFor(item.issue_type),
+      };
+    }
+
+    const aiResult = await generateContent(aiInput);
+
+    if (aiResult.success && aiResult.generated_text) {
+      process.stderr.write(
+        `[ai] generated for action ${actionId}: "${aiResult.generated_text}" ` +
+        `(confidence=${aiResult.confidence_score}, low_confidence=${aiResult.low_confidence})\n`,
+      );
+      const patchedFix = { ...item.proposed_fix, generated_text: aiResult.generated_text };
+      item.proposed_fix      = patchedFix;
+      const flagApproval     = aiResult.low_confidence === true ? true : undefined;
+      if (flagApproval) item.approval_required = true;
+      await patchQueueItemAiResult(actionId, item.tenant_id, patchedFix, flagApproval);
+    } else {
+      const errMsg = aiResult.error ?? 'unknown AI error';
+      process.stderr.write(`[ai] generation failed for ${actionId}: ${errMsg}\n`);
+      const patchedFix = { ...item.proposed_fix, fix_source: 'manual' };
+      item.proposed_fix      = patchedFix;
+      item.approval_required = true;
+      await patchQueueItemAiResult(actionId, item.tenant_id, patchedFix, true);
+    }
+  }
 
   const { applyPatch } = await import('../../patch-engine/src/index.js');
 
