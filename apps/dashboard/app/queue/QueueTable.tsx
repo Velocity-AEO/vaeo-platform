@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { supabase } from '@/lib/supabase';
 import type { CommandCenterRow } from '@/lib/types';
 import StatusBadge from '@/components/StatusBadge';
 import RiskBadge from '@/components/RiskBadge';
@@ -38,14 +37,15 @@ export default function CommandCenterTable({ rows, onStatusChange }: Props) {
 
   async function updateStatus(row: CommandCenterRow, newStatus: string) {
     setBusy(row.id);
-    const { error } = await supabase
-      .from('action_queue')
-      .update({ execution_status: newStatus, updated_at: new Date().toISOString() })
-      .eq('id', row.id)
-      .eq('tenant_id', row.tenant_id);
+    const res = await fetch(`/api/queue/${row.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ execution_status: newStatus }),
+    });
     setBusy(null);
-    if (error) {
-      addToast(`Error: ${error.message}`, 'error');
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({})) as { error?: string };
+      addToast(`Error: ${body.error ?? res.statusText}`, 'error');
       return;
     }
     onStatusChange(row.id, newStatus);

@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabase';
 import type { CommandCenterRow, CommandCenterStats } from '@/lib/types';
 import CommandCenterTable from './QueueTable';
 
@@ -20,56 +19,35 @@ const STAT_CARDS: { key: keyof CommandCenterStats; label: string; color: string 
 ];
 
 export default function CommandCenterPage() {
-  const [stats, setStats]   = useState<CommandCenterStats>(EMPTY_STATS);
-  const [rows,  setRows]    = useState<CommandCenterRow[]>([]);
+  const [stats,   setStats]   = useState<CommandCenterStats>(EMPTY_STATS);
+  const [rows,    setRows]    = useState<CommandCenterRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
       setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch('/api/queue');
+        if (!res.ok) throw new Error(`API error ${res.status}`);
+        const data = await res.json() as CommandCenterRow[];
 
-      // Fetch all action_queue rows with site_url joined
-      const { data: queueRows } = await supabase
-        .from('action_queue')
-        .select('*')
-        .in('execution_status', ['queued', 'deployed', 'failed', 'rolled_back'])
-        .order('priority', { ascending: true })
-        .order('risk_score', { ascending: false });
+        setRows(data);
 
-      if (!queueRows?.length) {
-        setRows([]);
-        setStats(EMPTY_STATS);
+        const s = { ...EMPTY_STATS };
+        for (const r of data) {
+          if (r.execution_status === 'queued' && r.approval_required) s.pending_approval++;
+          else if (r.execution_status === 'deployed')    s.deployed++;
+          else if (r.execution_status === 'rolled_back') s.rolled_back++;
+          else if (r.execution_status === 'failed')      s.failed++;
+        }
+        setStats(s);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
         setLoading(false);
-        return;
       }
-
-      // Enrich with site_url
-      const allSiteIds = queueRows.map((r) => r.site_id as string).filter(Boolean);
-      const siteIds = allSiteIds.filter((id, i) => allSiteIds.indexOf(id) === i);
-      const { data: sites } = await supabase
-        .from('sites')
-        .select('site_id, site_url')
-        .in('site_id', siteIds);
-
-      const siteMap = new Map((sites ?? []).map((s) => [s.site_id as string, s.site_url as string]));
-
-      const enriched: CommandCenterRow[] = queueRows.map((r) => ({
-        ...r,
-        site_url: siteMap.get(r.site_id as string) ?? (r.site_id as string),
-      }));
-
-      setRows(enriched);
-
-      // Compute stats from fetched rows
-      const s = { ...EMPTY_STATS };
-      for (const r of enriched) {
-        if (r.execution_status === 'queued' && r.approval_required) s.pending_approval++;
-        else if (r.execution_status === 'deployed')    s.deployed++;
-        else if (r.execution_status === 'rolled_back') s.rolled_back++;
-        else if (r.execution_status === 'failed')      s.failed++;
-      }
-      setStats(s);
-      setLoading(false);
     }
 
     load();
@@ -78,9 +56,8 @@ export default function CommandCenterPage() {
   function onStatusChange(id: string, newStatus: string) {
     setRows((prev) => {
       const updated = prev.map((r) =>
-        r.id === id ? { ...r, execution_status: newStatus as CommandCenterRow['execution_status'] } : r
+        r.id === id ? { ...r, execution_status: newStatus as CommandCenterRow['execution_status'] } : r,
       );
-      // Recompute stats
       const s = { ...EMPTY_STATS };
       for (const r of updated) {
         if (r.execution_status === 'queued' && r.approval_required) s.pending_approval++;
@@ -97,9 +74,8 @@ export default function CommandCenterPage() {
     <>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-semibold">Command Center</h1>
-        {loading && (
-          <span className="text-xs text-slate-400 animate-pulse">Loading…</span>
-        )}
+        {loading && <span className="text-xs text-slate-400 animate-pulse">Loading…</span>}
+        {error   && <span className="text-xs text-red-500">{error}</span>}
       </div>
 
       {/* Stats bar */}
