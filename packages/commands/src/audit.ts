@@ -40,6 +40,8 @@ const SHOPIFY_PROTECTED_PATHS = [
   '/orders',
   '/collections/vendors',
   '/collections/types',
+  '/customer_authentication',
+  '/customer_authentication/redirect',
 ];
 
 function isProtectedRoute(url: string): boolean {
@@ -294,24 +296,49 @@ export async function runAudit(
 
     const queueReady = withPriority.filter(({ issue }) => !isProtectedRoute(issue.url));
 
-    const queueRows: ActionQueueRow[] = queueReady.map(({ issue, issueCategory, priority }) => ({
-      run_id:            request.run_id,
-      tenant_id:         request.tenant_id,
-      site_id:           request.site_id,
-      cms_type:          request.cms,
-      issue_type:        issue.issue_type,
-      url:               issue.url,
-      risk_score:        issue.risk_score,
-      priority,
-      proposed_fix:      {
+    const queueRows: ActionQueueRow[] = queueReady.map(({ issue, issueCategory, priority }) => {
+      // Base proposed_fix — all issue types get category + auto_deploy stamped on.
+      let proposedFix: Record<string, unknown> = {
         ...issue.proposed_fix,
         category:    issueCategory,
         auto_deploy: issue.auto_deploy,
-      },
+      };
       // §5.2: risk >= 4 always requires approval (MVP default; tenant config can loosen)
-      approval_required: issue.approval_required || issue.risk_score >= 4,
-      execution_status:  'queued' as const,
-    }));
+      let approvalRequired = issue.approval_required || issue.risk_score >= 4;
+
+      // ── IMG_DIMENSIONS_MISSING enrichment ──────────────────────────────────
+      // The Shopify adapter needs product_id + image_id to write dimensions via
+      // the Admin API. If they're available (e.g. from a future enriched crawl),
+      // include them; otherwise mark fix_source='manual' and require approval so
+      // the item never silently fails in the adapter.
+      if (issue.issue_type === 'IMG_DIMENSIONS_MISSING') {
+        const productId = issue.proposed_fix['product_id'] ?? issue.issue_detail['product_id'];
+        const imageId   = issue.proposed_fix['image_id']   ?? issue.issue_detail['image_id'];
+        const newWidth  = issue.proposed_fix['new_width']  ?? issue.issue_detail['width']  ?? null;
+        const newHeight = issue.proposed_fix['new_height'] ?? issue.issue_detail['height'] ?? null;
+
+        if (productId && imageId) {
+          proposedFix = { ...proposedFix, product_id: productId, image_id: imageId, new_width: newWidth, new_height: newHeight };
+        } else {
+          proposedFix   = { ...proposedFix, fix_source: 'manual', new_width: newWidth, new_height: newHeight };
+          approvalRequired = true;
+        }
+      }
+
+      return {
+        run_id:            request.run_id,
+        tenant_id:         request.tenant_id,
+        site_id:           request.site_id,
+        cms_type:          request.cms,
+        issue_type:        issue.issue_type,
+        url:               issue.url,
+        risk_score:        issue.risk_score,
+        priority,
+        proposed_fix:      proposedFix,
+        approval_required: approvalRequired,
+        execution_status:  'queued' as const,
+      };
+    });
 
     // ── Step 6: Write to Supabase ─────────────────────────────────────────────
 

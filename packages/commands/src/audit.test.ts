@@ -413,3 +413,155 @@ describe('runAudit — issues_by_priority is always a complete 1-8 map', () => {
     assert.ok(['completed', 'failed'].includes(result.status));
   });
 });
+
+// ── runAudit — IMG_DIMENSIONS_MISSING proposed_fix enrichment ─────────────────
+
+describe('runAudit — IMG_DIMENSIONS_MISSING proposed_fix enrichment', () => {
+  function makeImgDimsIssue(overrides: {
+    proposedFix?: Record<string, unknown>;
+    issueDetail?: Record<string, unknown>;
+  } = {}): ScoredIssue {
+    return makeScoredIssue({
+      issue_type:   'IMG_DIMENSIONS_MISSING',
+      category:     'images',
+      risk_score:   2,
+      auto_deploy:  true,
+      approval_required: false,
+      issue_detail: { image_src: 'https://cdn.example.com/img.jpg', width: null, height: null, ...overrides.issueDetail },
+      proposed_fix: { action: 'inject_dimensions_from_metadata', image_src: 'https://cdn.example.com/img.jpg', ...overrides.proposedFix },
+    });
+  }
+
+  it('sets fix_source=manual and approval_required=true when product_id/image_id absent', async () => {
+    let captured: ActionQueueRow[] = [];
+    const issue = makeImgDimsIssue();
+    await runAudit(baseReq(), happy({
+      detectIssues:  () => [issue as unknown as DetectedIssue],
+      scoreIssues:   () => [issue],
+      writeQueue:    async (rows) => { captured = rows; return rows.length; },
+    }));
+    const row = captured[0]!;
+    assert.equal(row.proposed_fix['fix_source'], 'manual');
+    assert.equal(row.approval_required, true);
+    // product_id and image_id must not be present
+    assert.equal(row.proposed_fix['product_id'], undefined);
+    assert.equal(row.proposed_fix['image_id'],   undefined);
+  });
+
+  it('includes new_width and new_height from issue_detail when available', async () => {
+    let captured: ActionQueueRow[] = [];
+    const issue = makeImgDimsIssue({ issueDetail: { width: '800', height: '600', image_src: 'img.jpg' } });
+    await runAudit(baseReq(), happy({
+      detectIssues:  () => [issue as unknown as DetectedIssue],
+      scoreIssues:   () => [issue],
+      writeQueue:    async (rows) => { captured = rows; return rows.length; },
+    }));
+    const row = captured[0]!;
+    assert.equal(row.proposed_fix['new_width'],  '800');
+    assert.equal(row.proposed_fix['new_height'], '600');
+  });
+
+  it('includes new_width/new_height=null when crawl had no dimension data', async () => {
+    let captured: ActionQueueRow[] = [];
+    const issue = makeImgDimsIssue();
+    await runAudit(baseReq(), happy({
+      detectIssues:  () => [issue as unknown as DetectedIssue],
+      scoreIssues:   () => [issue],
+      writeQueue:    async (rows) => { captured = rows; return rows.length; },
+    }));
+    const row = captured[0]!;
+    assert.equal(row.proposed_fix['new_width'],  null);
+    assert.equal(row.proposed_fix['new_height'], null);
+  });
+
+  it('includes product_id and image_id when present in proposed_fix', async () => {
+    let captured: ActionQueueRow[] = [];
+    const issue = makeImgDimsIssue({
+      proposedFix: {
+        action:     'inject_dimensions_from_metadata',
+        image_src:  'img.jpg',
+        product_id: '987654321',
+        image_id:   '111222333',
+        new_width:  '1200',
+        new_height: '800',
+      },
+    });
+    await runAudit(baseReq(), happy({
+      detectIssues:  () => [issue as unknown as DetectedIssue],
+      scoreIssues:   () => [issue],
+      writeQueue:    async (rows) => { captured = rows; return rows.length; },
+    }));
+    const row = captured[0]!;
+    assert.equal(row.proposed_fix['product_id'], '987654321');
+    assert.equal(row.proposed_fix['image_id'],   '111222333');
+    assert.equal(row.proposed_fix['new_width'],  '1200');
+    assert.equal(row.proposed_fix['new_height'], '800');
+    // fix_source='manual' must NOT appear when IDs are present
+    assert.equal(row.proposed_fix['fix_source'], undefined);
+  });
+
+  it('does not mutate proposed_fix for non-image issue types', async () => {
+    let captured: ActionQueueRow[] = [];
+    const issue = makeScoredIssue({ issue_type: 'META_TITLE_MISSING', proposed_fix: { action: 'generate_title' } });
+    await runAudit(baseReq(), happy({
+      detectIssues:  () => [issue as unknown as DetectedIssue],
+      scoreIssues:   () => [issue],
+      writeQueue:    async (rows) => { captured = rows; return rows.length; },
+    }));
+    const row = captured[0]!;
+    assert.equal(row.proposed_fix['fix_source'], undefined);
+    assert.equal(row.proposed_fix['product_id'], undefined);
+  });
+});
+
+// ── runAudit — extended protected paths ───────────────────────────────────────
+
+describe('runAudit — extended protected paths (/customer_authentication)', () => {
+  function makeIssueAt(url: string): ScoredIssue {
+    return makeScoredIssue({ url, issue_type: 'META_TITLE_MISSING' });
+  }
+
+  it('filters /customer_authentication URLs', async () => {
+    let captured: ActionQueueRow[] = [];
+    const issue = makeIssueAt('https://example.com/customer_authentication');
+    await runAudit(baseReq(), happy({
+      detectIssues:  () => [issue as unknown as DetectedIssue],
+      scoreIssues:   () => [issue],
+      writeQueue:    async (rows) => { captured = rows; return rows.length; },
+    }));
+    assert.equal(captured.length, 0, 'Expected no rows — /customer_authentication is protected');
+  });
+
+  it('filters /customer_authentication/redirect URLs', async () => {
+    let captured: ActionQueueRow[] = [];
+    const issue = makeIssueAt('https://example.com/customer_authentication/redirect?locale=en');
+    await runAudit(baseReq(), happy({
+      detectIssues:  () => [issue as unknown as DetectedIssue],
+      scoreIssues:   () => [issue],
+      writeQueue:    async (rows) => { captured = rows; return rows.length; },
+    }));
+    assert.equal(captured.length, 0, 'Expected no rows — /customer_authentication/redirect is protected');
+  });
+
+  it('filters /customer_authentication/* subpaths', async () => {
+    let captured: ActionQueueRow[] = [];
+    const issue = makeIssueAt('https://example.com/customer_authentication/login_multipass/some_token');
+    await runAudit(baseReq(), happy({
+      detectIssues:  () => [issue as unknown as DetectedIssue],
+      scoreIssues:   () => [issue],
+      writeQueue:    async (rows) => { captured = rows; return rows.length; },
+    }));
+    assert.equal(captured.length, 0, 'Expected no rows — /customer_authentication/* is protected');
+  });
+
+  it('does not filter legitimate pages that share a prefix', async () => {
+    let captured: ActionQueueRow[] = [];
+    const issue = makeIssueAt('https://example.com/pages/about-us');
+    await runAudit(baseReq(), happy({
+      detectIssues:  () => [issue as unknown as DetectedIssue],
+      scoreIssues:   () => [issue],
+      writeQueue:    async (rows) => { captured = rows; return rows.length; },
+    }));
+    assert.equal(captured.length, 1, 'Expected /pages/about-us to pass through');
+  });
+});
