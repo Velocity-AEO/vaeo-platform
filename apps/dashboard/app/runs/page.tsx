@@ -51,20 +51,36 @@ export default async function RunsPage({
               </tr>
             )}
             {pageRuns.map((r) => (
-              <tr key={r.run_id} className="hover:bg-slate-50 transition-colors">
-                <td className="px-5 py-3 font-medium">
-                  <Link href={`/runs/${r.run_id}`} className="text-blue-600 hover:underline">
+              <tr key={r.run_id} className="hover:bg-slate-50 transition-colors cursor-pointer group">
+                <td className="px-0 font-medium">
+                  <Link href={`/runs/${r.run_id}`} className="block px-5 py-3 text-blue-600 group-hover:underline">
                     {r.site_url}
                   </Link>
                 </td>
-                <td className="px-5 py-3 text-slate-500 uppercase text-xs">{r.cms_type}</td>
-                <td className="px-5 py-3">
-                  <StatusBadge status={r.status} size="sm" />
+                <td className="px-0">
+                  <Link href={`/runs/${r.run_id}`} className="block px-5 py-3 text-slate-500 uppercase text-xs">
+                    {r.cms_type}
+                  </Link>
                 </td>
-                <td className="px-5 py-3 text-right tabular-nums text-xs">{r.urls_crawled ?? '—'}</td>
-                <td className="px-5 py-3 text-right tabular-nums text-xs">{r.fixes_deployed}</td>
-                <td className="px-5 py-3 text-slate-400 text-xs">
-                  {new Date(r.started_at).toLocaleString()}
+                <td className="px-0">
+                  <Link href={`/runs/${r.run_id}`} className="flex items-center px-5 py-3">
+                    <StatusBadge status={r.status} size="sm" />
+                  </Link>
+                </td>
+                <td className="px-0 text-right">
+                  <Link href={`/runs/${r.run_id}`} className="block px-5 py-3 tabular-nums text-xs">
+                    {r.urls_crawled ?? '—'}
+                  </Link>
+                </td>
+                <td className="px-0 text-right">
+                  <Link href={`/runs/${r.run_id}`} className="block px-5 py-3 tabular-nums text-xs">
+                    {r.fixes_deployed}
+                  </Link>
+                </td>
+                <td className="px-0">
+                  <Link href={`/runs/${r.run_id}`} className="block px-5 py-3 text-slate-400 text-xs">
+                    {new Date(r.started_at).toLocaleString()}
+                  </Link>
                 </td>
               </tr>
             ))}
