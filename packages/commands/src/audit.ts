@@ -44,20 +44,20 @@ export interface AuditRequest {
   cms:       CmsType;
 }
 
-/** One row written to the action_queue Supabase table. */
+/** One row written to the action_queue Supabase table. Matches live schema. */
 export interface ActionQueueRow {
-  run_id:           string;
-  tenant_id:        string;
-  site_id:          string;
-  issue_type:       string;
-  url:              string;
-  risk_score:       number;
-  priority:         number;           // 1–8 from PRIORITY_MAP
-  category:         IssueCategory;
-  proposed_fix:     Record<string, unknown>;
+  run_id:            string;
+  tenant_id:         string;
+  site_id:           string;
+  cms_type:          string;
+  issue_type:        string;
+  url:               string;
+  risk_score:        number;
+  priority:          number;           // 1–8 from PRIORITY_MAP
+  /** category and auto_deploy stored inside proposed_fix JSONB (not top-level columns). */
+  proposed_fix:      Record<string, unknown>;
   approval_required: boolean;
-  auto_deploy:      boolean;
-  execution_status: 'queued';
+  execution_status:  'queued';
 }
 
 export interface AuditResult {
@@ -77,12 +77,12 @@ export interface AuditResult {
 export interface AuditCommandOps {
   /** Load crawl_results rows for the given run_id from Supabase. */
   loadCrawlRows:  (runId: string, tenantId: string) => Promise<CrawlResultRow[]>;
-  /** Run all detectors against the crawl rows. */
-  detectIssues:   (rows: CrawlResultRow[], ctx: DetectorCtx) => DetectedIssue[];
-  /** Score all detected issues. */
-  scoreIssues:    (issues: DetectedIssue[]) => ScoredIssue[];
-  /** Evaluate issues against guardrail priority ladder. */
-  evaluateOrder:  (issues: ScoredIssue[]) => ProposedAction[];
+  /** Run all detectors against the crawl rows. May be sync or async. */
+  detectIssues:   (rows: CrawlResultRow[], ctx: DetectorCtx) => DetectedIssue[] | Promise<DetectedIssue[]>;
+  /** Score all detected issues. May be sync or async. */
+  scoreIssues:    (issues: DetectedIssue[]) => ScoredIssue[] | Promise<ScoredIssue[]>;
+  /** Evaluate issues against guardrail priority ladder. May be sync or async. */
+  evaluateOrder:  (issues: ScoredIssue[]) => ProposedAction[] | Promise<ProposedAction[]>;
   /** Write action_queue rows to Supabase. Returns number of rows inserted. */
   writeQueue:     (rows: ActionQueueRow[]) => Promise<number>;
 }
@@ -103,21 +103,18 @@ const realLoadCrawlRows: AuditCommandOps['loadCrawlRows'] = async (runId, tenant
   return (data ?? []) as CrawlResultRow[];
 };
 
-const realDetectIssues: AuditCommandOps['detectIssues'] = (rows, ctx) => {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { runAllDetectors } = require('../../detectors/src/index.js') as typeof import('../../detectors/src/index.js');
+const realDetectIssues: AuditCommandOps['detectIssues'] = async (rows, ctx) => {
+  const { runAllDetectors } = await import('../../detectors/src/index.js');
   return runAllDetectors(rows, ctx);
 };
 
-const realScoreIssues: AuditCommandOps['scoreIssues'] = (issues) => {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { scoreIssues } = require('../../risk-scorer/src/index.js') as typeof import('../../risk-scorer/src/index.js');
+const realScoreIssues: AuditCommandOps['scoreIssues'] = async (issues) => {
+  const { scoreIssues } = await import('../../risk-scorer/src/index.js');
   return scoreIssues(issues);
 };
 
-const realEvaluateOrder: AuditCommandOps['evaluateOrder'] = (issues) => {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { evaluate } = require('../../guardrail/src/index.js') as typeof import('../../guardrail/src/index.js');
+const realEvaluateOrder: AuditCommandOps['evaluateOrder'] = async (issues) => {
+  const { evaluate } = await import('../../guardrail/src/index.js');
   // Pass empty resolvedCategories — audit always starts with nothing resolved.
   const decision = evaluate(
     issues.map((issue, idx) => ({
@@ -238,11 +235,11 @@ export async function runAudit(
       cms:       request.cms,
     };
 
-    const detected = ops.detectIssues(rows, ctx);
+    const detected = await Promise.resolve(ops.detectIssues(rows, ctx));
 
     // ── Step 3: Score issues ──────────────────────────────────────────────────
 
-    const scored = ops.scoreIssues(detected);
+    const scored = await Promise.resolve(ops.scoreIssues(detected));
 
     // ── Step 4: Map categories + sort by priority then risk_score desc ────────
 
@@ -263,14 +260,17 @@ export async function runAudit(
       run_id:            request.run_id,
       tenant_id:         request.tenant_id,
       site_id:           request.site_id,
+      cms_type:          request.cms,
       issue_type:        issue.issue_type,
       url:               issue.url,
       risk_score:        issue.risk_score,
       priority,
-      category:          issueCategory,
-      proposed_fix:      issue.proposed_fix,
+      proposed_fix:      {
+        ...issue.proposed_fix,
+        category:    issueCategory,
+        auto_deploy: issue.auto_deploy,
+      },
       approval_required: issue.approval_required,
-      auto_deploy:       issue.auto_deploy,
       execution_status:  'queued' as const,
     }));
 

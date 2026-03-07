@@ -224,11 +224,14 @@ describe('runAudit — action_queue rows have correct shape', () => {
     assert.equal(row.run_id,           RUN_ID);
     assert.equal(row.tenant_id,        TENANT_ID);
     assert.equal(row.site_id,          SITE_ID);
+    assert.equal(row.cms_type,         'shopify');
     assert.equal(row.execution_status, 'queued');
-    assert.equal(typeof row.risk_score,  'number');
-    assert.equal(typeof row.priority,    'number');
+    assert.equal(typeof row.risk_score, 'number');
+    assert.equal(typeof row.priority,   'number');
     assert.ok(row.priority >= 1 && row.priority <= 8);
-    assert.ok(['errors','redirects','canonicals','indexing','content','schema','performance','enhancements'].includes(row.category));
+    // category and auto_deploy live inside proposed_fix JSONB
+    const fix = row.proposed_fix;
+    assert.ok(['errors','redirects','canonicals','indexing','content','schema','performance','enhancements'].includes(String(fix['category'])));
   });
 
   it('action_queue_populated=false when no issues found', async () => {
