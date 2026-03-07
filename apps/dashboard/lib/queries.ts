@@ -26,11 +26,10 @@ export async function getDashboardStats(): Promise<DashboardStats> {
       .eq('execution_status', 'deployed')
       .gte('updated_at', todayIso),
 
-    // Pending approval — queued + approval_required (open items, all time)
+    // Pending approval — items routed to human review
     db.from('action_queue')
       .select('id', { count: 'exact', head: true })
-      .eq('execution_status', 'queued')
-      .eq('approval_required', true),
+      .eq('execution_status', 'pending_approval'),
 
     // Failed fixes in last 24 h (true failures, not intentional rollbacks)
     db.from('action_queue')
@@ -228,7 +227,7 @@ export async function getCommandCenterItems(): Promise<CommandCenterRow[]> {
   const { data: rows } = await db
     .from('action_queue')
     .select('*')
-    .in('execution_status', ['queued', 'deployed', 'failed', 'rolled_back'])
+    .in('execution_status', ['queued', 'pending_approval', 'deployed', 'failed', 'rolled_back'])
     .order('priority', { ascending: true })
     .order('risk_score', { ascending: false });
 
@@ -255,7 +254,7 @@ export async function getCommandCenterStats(): Promise<CommandCenterStats> {
 
   const [pendingRes, deployedRes, rolledBackRes, failedRes] = await Promise.all([
     db.from('action_queue').select('id', { count: 'exact', head: true })
-      .eq('execution_status', 'queued').eq('approval_required', true),
+      .eq('execution_status', 'pending_approval'),
     db.from('action_queue').select('id', { count: 'exact', head: true })
       .eq('execution_status', 'deployed'),
     db.from('action_queue').select('id', { count: 'exact', head: true })
