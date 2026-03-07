@@ -1,5 +1,6 @@
 import { createServerClient } from './supabase';
 import type { ActionQueueRow, CommandCenterRow, CommandCenterStats, DashboardStats, RunSummary, Site, SiteWithStats } from './types';
+import { calculateHealthScore } from '@vaeo/scoring';
 
 // ── Dashboard home ────────────────────────────────────────────────────────────
 
@@ -145,24 +146,31 @@ export async function getAllSites(): Promise<SiteWithStats[]> {
     }
   }
 
-  // Total action_queue issues per site
+  // Open action_queue issues per site — used for total count + health score
   const { data: issueRows } = await db
     .from('action_queue')
-    .select('site_id')
-    .in('site_id', siteIds);
+    .select('site_id, issue_type')
+    .in('site_id', siteIds)
+    .in('execution_status', ['queued', 'pending_approval', 'failed']);
 
-  const issuesBySite = new Map<string, number>();
+  const issuesBySite  = new Map<string, number>();
+  const issueTypeBySite = new Map<string, Array<{ issue_type: string }>>();
   for (const row of issueRows ?? []) {
     issuesBySite.set(row.site_id, (issuesBySite.get(row.site_id) ?? 0) + 1);
+    const arr = issueTypeBySite.get(row.site_id) ?? [];
+    arr.push({ issue_type: row.issue_type });
+    issueTypeBySite.set(row.site_id, arr);
   }
 
   return sites.map((s: Site) => {
     const latest = latestBySite.get(s.site_id);
+    const health = calculateHealthScore(issueTypeBySite.get(s.site_id) ?? []);
     return {
       ...s,
-      last_run_at:  latest?.ts      ?? null,
-      last_run_id:  latest?.run_id  ?? null,
-      total_issues: issuesBySite.get(s.site_id) ?? 0,
+      last_run_at:   latest?.ts      ?? null,
+      last_run_id:   latest?.run_id  ?? null,
+      total_issues:  issuesBySite.get(s.site_id) ?? 0,
+      health_score:  health,
     };
   });
 }

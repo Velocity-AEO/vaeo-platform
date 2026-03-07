@@ -74,4 +74,5 @@ export interface SiteWithStats extends Site {
   last_run_at:  string | null;
   last_run_id:  string | null;
   total_issues: number;
+  health_score: { total: number; technical: number; content: number; schema: number; grade: string };
 }
