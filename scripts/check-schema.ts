@@ -21,30 +21,42 @@
 
 /**
  * Map of table → expected column names.
- * Listed in approximate creation/logical order.
+ * Lists only the columns that application code depends on.
  * "Extra" columns in live DB are logged as informational, not drift.
  * "Missing" columns are drift and cause exit 1.
+ *
+ * Updated 2026-03-06 based on live DB inspection:
+ *   sites          — PK is site_id (not id); cms stored as cms_type; no updated_at
+ *   action_queue   — no patch_type or status column; uses execution_status; has risk_score, approval_required, rollback_flagged
+ *   action_log     — PK is log_id (not id); timestamp column is ts (not created_at); rich column set
+ *   crawl_results  — PK is crawl_id (not id); stores extracted fields (title/meta_desc/h1/h2/…) not a metadata blob
+ *   site_snapshots — PK is snapshot_id; confirmed empty at time of audit
+ *   rollback_manifests — confirmed empty at time of audit; kept for completeness
  */
 const EXPECTED_SCHEMA: Record<string, string[]> = {
   sites: [
-    'id', 'tenant_id', 'site_url', 'cms', 'created_at', 'updated_at',
+    'site_id', 'tenant_id', 'site_url', 'cms_type', 'created_at', 'verified_at',
   ],
   action_queue: [
     'id', 'run_id', 'tenant_id', 'site_id', 'url', 'issue_type',
-    'patch_type', 'priority', 'status', 'proposed_fix', 'rollback_manifest',
-    'cms_type', 'created_at', 'updated_at',
+    'priority', 'proposed_fix', 'rollback_manifest', 'cms_type',
+    'execution_status', 'risk_score', 'approval_required',
+    'created_at', 'updated_at',
   ],
   action_log: [
-    'id', 'run_id', 'tenant_id', 'site_id', 'action_id', 'cms_type',
-    'stage', 'status', 'metadata', 'created_at',
+    'log_id', 'run_id', 'tenant_id', 'site_id', 'action_id', 'cms_type',
+    'stage', 'status', 'ts',
+    // Rich audit columns also present in live:
+    'command', 'url', 'field', 'before_value', 'after_value',
+    'proof_artifacts', 'error', 'duration_ms',
   ],
   crawl_results: [
-    'id', 'run_id', 'tenant_id', 'site_id', 'url', 'status_code',
-    'content_type', 'crawled_at', 'metadata',
+    'crawl_id', 'run_id', 'tenant_id', 'site_id', 'url', 'status_code', 'crawled_at',
+    'title', 'meta_desc', 'h1', 'h2', 'images',
+    'internal_links', 'schema_blocks', 'canonical', 'redirect_chain', 'load_time_ms',
   ],
   site_snapshots: [
-    'id', 'run_id', 'tenant_id', 'site_id', 'snapshot_type',
-    'data', 'created_at',
+    'snapshot_id', 'run_id', 'tenant_id', 'site_id', 'created_at',
   ],
   rollback_manifests: [
     'id', 'action_id', 'run_id', 'tenant_id', 'cms_type',
