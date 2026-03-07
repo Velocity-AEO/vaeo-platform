@@ -27,7 +27,8 @@
  * Never throws — always returns RollbackResult.
  */
 
-import { createLogger } from '../../action-log/src/index.js';
+import type { CmsType } from '../../core/types.js';
+import { createLogger }  from '../../action-log/src/index.js';
 
 // ── Item shape ────────────────────────────────────────────────────────────────
 
@@ -62,6 +63,7 @@ export interface RollbackRequest {
   run_id:        string;
   tenant_id:     string;
   site_id:       string;
+  cms:           CmsType;
   /** If provided, rollback only this single action_queue item. */
   action_id?:    string;
   /** If true, rollback all deployed/regression_detected items for this run. */
@@ -154,28 +156,39 @@ const realLoadManifest: RollbackCommandOps['loadManifest'] = async (item) => {
   const { getConfig }    = await import('../../core/config.js');
   const cfg = getConfig();
   const db  = createClient(cfg.supabaseUrl, cfg.supabaseServiceKey);
+  // Read rollback_manifest JSONB column from action_queue — written by applyPatch()
   const { data, error } = await db
-    .from('rollback_manifests')
-    .select('manifest_id, run_id, tenant_id, patches')
-    .eq('run_id', item.run_id)
+    .from('action_queue')
+    .select('id, run_id, tenant_id, rollback_manifest')
+    .eq('id', item.id)
     .eq('tenant_id', item.tenant_id)
     .maybeSingle();
-  if (error) throw new Error(`rollback_manifests load failed: ${error.message}`);
+  if (error) throw new Error(`action_queue rollback_manifest load failed: ${error.message}`);
   if (!data) return null;
-  const row = data as { manifest_id: string; run_id: string; tenant_id: string; patches: unknown[] };
+  const row = data as { id: string; run_id: string; tenant_id: string; rollback_manifest: unknown };
+  if (!row.rollback_manifest) return null;
+  const m = row.rollback_manifest as Record<string, unknown>;
   return {
-    manifest_id:      row.manifest_id,
-    run_id:           row.run_id,
+    manifest_id:      String(m['action_id'] ?? row.id),
+    run_id:           String(m['run_id']    ?? row.run_id),
     tenant_id:        row.tenant_id,
-    fields_to_reverse: (row.patches ?? []).length,
+    fields_to_reverse: 1,
   };
 };
 
 const realExecuteRollback: RollbackCommandOps['executeRollback'] = async (item, _manifest) => {
-  const { executeRollback } =
-    await import('../../patch-engine/src/rollback-runner.js');
-  const result = await executeRollback(item.run_id, item.tenant_id);
-  return { fields_reversed: result.fields_reversed };
+  // Call Shopify adapter revertFix directly — rollback-runner queries the
+  // non-existent rollback_manifests table; action_queue.rollback_manifest is used instead.
+  const { revertFix } = await import('../../adapters/shopify/src/index.js');
+  const result = await revertFix({
+    action_id:    item.id,
+    access_token: process.env['SHOPIFY_POC_ACCESS_TOKEN'] ?? '',
+    store_url:    process.env['SHOPIFY_POC_STORE_URL']    ?? '',
+    fix_type:     item.issue_type,
+    before_value: {},
+  });
+  if (!result.success) throw new Error(result.error ?? 'shopify revertFix failed');
+  return { fields_reversed: 1 };
 };
 
 const realMarkRolledBack: RollbackCommandOps['markRolledBack'] = async (itemId, tenantId) => {
@@ -238,6 +251,7 @@ export async function runRollback(
     run_id:    request.run_id,
     tenant_id: request.tenant_id,
     site_id:   request.site_id,
+    cms:       request.cms,
     command:   'rollback',
   });
 
@@ -411,6 +425,7 @@ export async function runRollbackCli(opts: {
   runId:       string;
   tenantId:    string;
   siteId:      string;
+  cms:         CmsType;
   actionId?:   string;
   all?:        boolean;
 }): Promise<void> {
@@ -418,6 +433,7 @@ export async function runRollbackCli(opts: {
     run_id:       opts.runId,
     tenant_id:    opts.tenantId,
     site_id:      opts.siteId,
+    cms:          opts.cms,
     action_id:    opts.actionId,
     rollback_all: opts.all,
   });

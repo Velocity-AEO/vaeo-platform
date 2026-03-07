@@ -28,6 +28,7 @@ function baseReq(overrides: Partial<RollbackRequest> = {}): RollbackRequest {
     run_id:       RUN_ID,
     tenant_id:    TENANT_ID,
     site_id:      SITE_ID,
+    cms:          'shopify',
     rollback_all: true,
     ...overrides,
   };
@@ -514,7 +515,7 @@ describe('runRollback — never throws when no deployed items found', () => {
   });
 
   it('returns status=failed when neither action_id nor rollback_all provided', async () => {
-    const result = await runRollback({ run_id: RUN_ID, tenant_id: TENANT_ID, site_id: SITE_ID }, happy());
+    const result = await runRollback({ run_id: RUN_ID, tenant_id: TENANT_ID, site_id: SITE_ID, cms: 'shopify' }, happy());
     assert.equal(result.status, 'failed');
     assert.ok(result.error?.includes('--action-id'));
   });
