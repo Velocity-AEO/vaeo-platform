@@ -683,3 +683,94 @@ describe('runAudit — noindex filter excludes pages with robots_meta=noindex', 
     assert.equal(captured.length, 0, 'Expected no rows — NOINDEX is case-insensitive match');
   });
 });
+
+// ── runAudit — GSC keyword enrichment ─────────────────────────────────────────
+
+describe('runAudit — GSC keyword enrichment via fetchTopKeywords', () => {
+  const MOCK_KEYWORDS = [
+    { query: 'returns policy', impressions: 220, position: 4.2 },
+    { query: 'return items',   impressions: 150, position: 6.1 },
+    { query: 'refund request', impressions:  80, position: 9.3 },
+  ];
+
+  it('stores top_keywords in proposed_fix for META_TITLE_MISSING', async () => {
+    let captured: ActionQueueRow[] = [];
+    const issue = makeScoredIssue({ issue_type: 'META_TITLE_MISSING' });
+    await runAudit(baseReq(), happy({
+      detectIssues:      () => [issue as unknown as DetectedIssue],
+      scoreIssues:       () => [issue],
+      fetchTopKeywords:  async () => MOCK_KEYWORDS,
+      writeQueue:        async (rows) => { captured = rows; return rows.length; },
+    }));
+    const fix = captured[0]!.proposed_fix;
+    assert.deepEqual(fix['top_keywords'], MOCK_KEYWORDS, 'top_keywords should be stored in proposed_fix');
+  });
+
+  it('stores top_keywords in proposed_fix for META_DESC_MISSING', async () => {
+    let captured: ActionQueueRow[] = [];
+    const issue = makeScoredIssue({ issue_type: 'META_DESC_MISSING', category: 'metadata' });
+    await runAudit(baseReq(), happy({
+      detectIssues:      () => [issue as unknown as DetectedIssue],
+      scoreIssues:       () => [issue],
+      fetchTopKeywords:  async () => MOCK_KEYWORDS,
+      writeQueue:        async (rows) => { captured = rows; return rows.length; },
+    }));
+    const fix = captured[0]!.proposed_fix;
+    assert.deepEqual(fix['top_keywords'], MOCK_KEYWORDS);
+  });
+
+  it('does NOT call fetchTopKeywords for IMG_ALT_MISSING', async () => {
+    let fetchCalled = false;
+    const issue = makeScoredIssue({ issue_type: 'IMG_ALT_MISSING', category: 'images' });
+    await runAudit(baseReq(), happy({
+      detectIssues:      () => [issue as unknown as DetectedIssue],
+      scoreIssues:       () => [issue],
+      fetchTopKeywords:  async () => { fetchCalled = true; return []; },
+      writeQueue:        async (rows) => rows.length,
+    }));
+    assert.equal(fetchCalled, false, 'fetchTopKeywords should not be called for IMG_ALT_MISSING');
+  });
+
+  it('stores empty array when fetchTopKeywords returns []', async () => {
+    let captured: ActionQueueRow[] = [];
+    const issue = makeScoredIssue({ issue_type: 'META_TITLE_MISSING' });
+    await runAudit(baseReq(), happy({
+      detectIssues:      () => [issue as unknown as DetectedIssue],
+      scoreIssues:       () => [issue],
+      fetchTopKeywords:  async () => [],
+      writeQueue:        async (rows) => { captured = rows; return rows.length; },
+    }));
+    assert.deepEqual(captured[0]!.proposed_fix['top_keywords'], []);
+  });
+
+  it('proceeds without top_keywords when fetchTopKeywords is absent (GSC not configured)', async () => {
+    let captured: ActionQueueRow[] = [];
+    const issue = makeScoredIssue({ issue_type: 'META_TITLE_MISSING' });
+    // No fetchTopKeywords in ops → enrichment step is skipped entirely
+    await runAudit(baseReq(), happy({
+      detectIssues: () => [issue as unknown as DetectedIssue],
+      scoreIssues:  () => [issue],
+      writeQueue:   async (rows) => { captured = rows; return rows.length; },
+    }));
+    assert.equal(
+      captured[0]!.proposed_fix['top_keywords'],
+      undefined,
+      'top_keywords should be absent when GSC is not configured',
+    );
+  });
+
+  it('does not fail when fetchTopKeywords throws (non-blocking)', async () => {
+    let captured: ActionQueueRow[] = [];
+    const issue = makeScoredIssue({ issue_type: 'META_TITLE_MISSING' });
+    await assert.doesNotReject(() =>
+      runAudit(baseReq(), happy({
+        detectIssues:      () => [issue as unknown as DetectedIssue],
+        scoreIssues:       () => [issue],
+        fetchTopKeywords:  async () => { throw new Error('GSC timeout'); },
+        writeQueue:        async (rows) => { captured = rows; return rows.length; },
+      })),
+    );
+    // Row should still be written even if GSC failed
+    assert.equal(captured.length, 1, 'Row should still be written when GSC fails');
+  });
+});

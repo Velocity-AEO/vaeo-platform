@@ -139,15 +139,24 @@ export interface AuditResult {
 
 export interface AuditCommandOps {
   /** Load crawl_results rows for the given run_id from Supabase. */
-  loadCrawlRows:  (runId: string, tenantId: string) => Promise<CrawlResultRow[]>;
+  loadCrawlRows:     (runId: string, tenantId: string) => Promise<CrawlResultRow[]>;
   /** Run all detectors against the crawl rows. May be sync or async. */
-  detectIssues:   (rows: CrawlResultRow[], ctx: DetectorCtx) => DetectedIssue[] | Promise<DetectedIssue[]>;
+  detectIssues:      (rows: CrawlResultRow[], ctx: DetectorCtx) => DetectedIssue[] | Promise<DetectedIssue[]>;
   /** Score all detected issues. May be sync or async. */
-  scoreIssues:    (issues: DetectedIssue[]) => ScoredIssue[] | Promise<ScoredIssue[]>;
+  scoreIssues:       (issues: DetectedIssue[]) => ScoredIssue[] | Promise<ScoredIssue[]>;
   /** Evaluate issues against guardrail priority ladder. May be sync or async. */
-  evaluateOrder:  (issues: ScoredIssue[]) => ProposedAction[] | Promise<ProposedAction[]>;
+  evaluateOrder:     (issues: ScoredIssue[]) => ProposedAction[] | Promise<ProposedAction[]>;
   /** Write action_queue rows to Supabase. Returns number of rows inserted. */
-  writeQueue:     (rows: ActionQueueRow[]) => Promise<number>;
+  writeQueue:        (rows: ActionQueueRow[]) => Promise<number>;
+  /**
+   * Optional: fetch top keywords from GSC for META_TITLE/DESC enrichment.
+   * Omit or return [] to skip enrichment (e.g. when GSC is not configured).
+   * Returns top 3 keywords sorted by impressions DESC.
+   */
+  fetchTopKeywords?: (
+    siteUrl: string,
+    pageUrl: string,
+  ) => Promise<Array<{ query: string; impressions: number; position: number }>>;
 }
 
 // ── Default (real) ops ────────────────────────────────────────────────────────
@@ -201,6 +210,18 @@ const realWriteQueue: AuditCommandOps['writeQueue'] = async (rows) => {
   return rows.length;
 };
 
+/**
+ * Real GSC keyword enrichment — only active when GSC credentials are present.
+ * Returns [] silently if GSC is not configured (no throw, no warning).
+ */
+const realFetchTopKeywords: NonNullable<AuditCommandOps['fetchTopKeywords']> = async (
+  siteUrl,
+  pageUrl,
+) => {
+  const { getTopKeywords } = await import('../../adapters/gsc/src/index.js');
+  return getTopKeywords(siteUrl, pageUrl);
+};
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /** Derives a patch_type string from issue_type for the action queue. */
@@ -243,6 +264,8 @@ export async function runAudit(
     scoreIssues:    realScoreIssues,
     evaluateOrder:  realEvaluateOrder,
     writeQueue:     realWriteQueue,
+    // GSC enrichment only active when credentials are in env
+    ...(process.env['GSC_CLIENT_ID'] ? { fetchTopKeywords: realFetchTopKeywords } : {}),
     ..._testOps,
   };
 
@@ -386,7 +409,31 @@ export async function runAudit(
       };
     });
 
-    // ── Step 6: Write to Supabase ─────────────────────────────────────────────
+    // ── Step 6: Enrich META_TITLE/DESC rows with GSC keyword data ────────────
+    // Only runs when fetchTopKeywords op is present (i.e. GSC_CLIENT_ID is set).
+    // Failures are non-blocking — top_keywords stays absent rather than throwing.
+
+    if (ops.fetchTopKeywords) {
+      // Derive site URL from the first row's hostname
+      let siteUrl = '';
+      try {
+        const firstUrl = queueRows[0]?.url ?? '';
+        const { origin } = new URL(firstUrl);
+        siteUrl = origin + '/';
+      } catch { /* leave siteUrl empty — getTopKeywords returns [] safely */ }
+
+      const GSC_TYPES = new Set(['META_TITLE_MISSING', 'META_DESC_MISSING']);
+      for (const row of queueRows) {
+        if (GSC_TYPES.has(row.issue_type)) {
+          try {
+            const keywords = await ops.fetchTopKeywords(siteUrl, row.url);
+            row.proposed_fix = { ...row.proposed_fix, top_keywords: keywords };
+          } catch { /* non-blocking */ }
+        }
+      }
+    }
+
+    // ── Step 7: Write to Supabase ─────────────────────────────────────────────
 
     let action_queue_populated = false;
     if (queueRows.length > 0) {
