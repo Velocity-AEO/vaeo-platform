@@ -315,3 +315,47 @@ export async function crawlSite(request: CrawlSiteRequest): Promise<CrawlSiteRes
     status,
   };
 }
+
+// ── Legacy compatibility (packages/commands/src/crawl.ts) ─────────────────────
+
+/** Options passed to the legacy crawl() entry point. */
+export interface CrawlOptions {
+  run_id:     string;
+  tenant_id:  string;
+  site_id:    string;
+  cms:        string;
+  start_url:  string;
+  max_urls?:  number;
+  max_depth?: number;
+}
+
+/** Aggregate summary returned by the legacy crawl() entry point. */
+export interface LegacyCrawlResult {
+  urls_crawled: number;
+  urls_failed:  number;
+  duration_ms:  number;
+}
+
+/**
+ * Legacy entry point — wraps crawlSite() so packages/commands/src/crawl.ts
+ * continues to work without modification.
+ */
+export async function crawl(opts: CrawlOptions): Promise<LegacyCrawlResult> {
+  const startMs = Date.now();
+  const result  = await crawlSite({
+    run_id:    opts.run_id,
+    tenant_id: opts.tenant_id,
+    site_id:   opts.site_id,
+    site_url:  opts.start_url,
+    max_urls:  opts.max_urls,
+    depth:     opts.max_depth,
+  });
+  const urls_failed = result.results.filter(
+    r => r.status_code === 0 || r.status_code >= 400,
+  ).length;
+  return {
+    urls_crawled: result.urls_crawled,
+    urls_failed,
+    duration_ms:  Date.now() - startMs,
+  };
+}
