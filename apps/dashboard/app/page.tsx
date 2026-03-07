@@ -46,7 +46,7 @@ export default async function DashboardPage() {
         <StatCard label="Runs today"           value={stats.total_runs_today} />
         <StatCard label="Fixes deployed today" value={stats.fixes_deployed_today} />
         <StatCard label="Pending approval"     value={stats.fixes_pending_approval} highlight />
-        <StatCard label="Active regressions"   value={stats.active_regressions}    danger />
+        <StatCard label="Failed fixes (24h)"    value={stats.active_regressions}    danger />
       </div>
 
       {/* Recent runs table */}

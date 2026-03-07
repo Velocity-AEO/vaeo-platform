@@ -32,10 +32,10 @@ export async function getDashboardStats(): Promise<DashboardStats> {
       .eq('execution_status', 'queued')
       .eq('approval_required', true),
 
-    // Active regressions — rolled_back in last 24 h
+    // Failed fixes in last 24 h (true failures, not intentional rollbacks)
     db.from('action_queue')
       .select('id', { count: 'exact', head: true })
-      .eq('execution_status', 'rolled_back')
+      .eq('execution_status', 'failed')
       .gte('updated_at', minus24h),
   ]);
 
@@ -43,7 +43,7 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     total_runs_today:       distinctRuns.size,
     fixes_deployed_today:   deployedRes.count  ?? 0,
     fixes_pending_approval: pendingRes.count   ?? 0,
-    active_regressions:     regressionRes.count ?? 0,
+    active_regressions:     regressionRes.count ?? 0,  // now counts 'failed' not 'rolled_back'
   };
 }
 
