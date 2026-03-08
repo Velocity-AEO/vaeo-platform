@@ -20,6 +20,8 @@
  *   h1, schema, redirect
  */
 
+import type { CMSAdapter, PatchManifest, TemplateRef, UrlEntry } from '../../../packages/core/types.js';
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface ShopifyCredentials {
@@ -641,5 +643,98 @@ export async function revertFix(request: ShopifyRevertRequest): Promise<ShopifyR
       `[shopify-adapter] revert:error — action_id=${request.action_id}: ${msg}\n`,
     );
     return { action_id: request.action_id, success: false, error: msg };
+  }
+}
+
+// ── ShopifyAdapter class (CMSAdapter interface) ───────────────────────────────
+
+/**
+ * Class-based CMSAdapter implementation used by rollback-runner and platform core.
+ * Credentials are read from environment variables:
+ *   SHOP_STORE_DOMAIN — the .myshopify.com host
+ *   SHOP_API_TOKEN    — the Admin API access token
+ *
+ * rollback() iterates patches in reverse and restores each field.
+ * before_value string format per field:
+ *   image_dimensions → "product_id:image_id:width:height"
+ */
+export class ShopifyAdapter implements CMSAdapter {
+  private host:    string;
+  private headers: Record<string, string>;
+
+  constructor() {
+    this.host    = normaliseStoreUrl(process.env['SHOP_STORE_DOMAIN'] ?? '');
+    this.headers = authHeaders(process.env['SHOP_API_TOKEN'] ?? '');
+  }
+
+  async fetch_state(_siteId: string): Promise<Record<string, unknown>> {
+    throw new Error('[shopify-adapter] fetch_state not yet implemented');
+  }
+
+  async apply_patch(_manifest: PatchManifest): Promise<string[]> {
+    throw new Error('[shopify-adapter] apply_patch not yet implemented');
+  }
+
+  /**
+   * Reverses all patches in the manifest (in reverse order) using before_value strings.
+   * Collects all errors before throwing so partial rollbacks are reported.
+   */
+  async rollback(manifest: PatchManifest): Promise<void> {
+    const errors: string[] = [];
+
+    for (const fix of [...manifest.patches].reverse()) {
+      if (fix.before_value === null) continue;
+
+      try {
+        switch (fix.field) {
+          case 'image_dimensions': {
+            // before_value format: "product_id:image_id:width:height"
+            const [productId, imageId, widthStr, heightStr] = (fix.before_value ?? '').split(':');
+            if (!productId || !imageId || !widthStr || !heightStr) {
+              throw new Error(`image_dimensions revert: malformed before_value "${fix.before_value}"`);
+            }
+
+            const putUrl = `https://${this.host}/admin/api/2024-01/products/${productId}/images/${imageId}.json`;
+            console.log(`[shopify] PUT ${putUrl} → restoring width=${widthStr}, height=${heightStr}`);
+            const putRes = await shopifyFetch(putUrl, {
+              method:  'PUT',
+              headers: this.headers,
+              body:    JSON.stringify({
+                image: {
+                  id:     parseInt(imageId,  10),
+                  width:  parseInt(widthStr,  10),
+                  height: parseInt(heightStr, 10),
+                },
+              }),
+            });
+
+            if (!putRes.ok) {
+              const errText = await putRes.text();
+              throw new Error(`image_dimensions revert failed: ${putRes.status} — ${errText}`);
+            }
+            break;
+          }
+
+          default:
+            process.stderr.write(
+              `[shopify-adapter] rollback:stub — field="${fix.field}" not yet wired\n`,
+            );
+        }
+      } catch (err) {
+        errors.push(`${fix.field}@${fix.url}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    if (errors.length > 0) {
+      throw new Error(`[shopify-adapter] rollback failed:\n${errors.map((e) => `  - ${e}`).join('\n')}`);
+    }
+  }
+
+  async list_templates(_siteId: string): Promise<TemplateRef[]> {
+    throw new Error('[shopify-adapter] list_templates not yet implemented');
+  }
+
+  async list_urls(_siteId: string): Promise<UrlEntry[]> {
+    throw new Error('[shopify-adapter] list_urls not yet implemented');
   }
 }

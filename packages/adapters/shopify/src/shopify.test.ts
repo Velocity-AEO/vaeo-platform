@@ -11,6 +11,7 @@ import {
   verifyConnection,
   applyFix,
   revertFix,
+  ShopifyAdapter,
   _injectFetch,
   _resetInjections,
 } from './index.js';
@@ -609,5 +610,132 @@ describe('revertFix', () => {
     let threw = false;
     try { await revertFix(BASE_REVERT); } catch { threw = true; }
     assert.equal(threw, false);
+  });
+});
+
+// ── ShopifyAdapter.rollback ───────────────────────────────────────────────────
+
+function makePatchManifest(
+  patches: { field: string; before_value: string | null; url?: string }[],
+) {
+  return {
+    run_id:     'run-1',
+    site_id:    'site-1',
+    cms:        'shopify' as const,
+    backup_ref: '',
+    patches: patches.map((p) => ({
+      idempotency_key: `key:${p.field}`,
+      url:             p.url ?? 'https://mystore.myshopify.com/products/test',
+      field:           p.field,
+      before_value:    p.before_value,
+      after_value:     'new-value',
+      confidence:      'safe' as const,
+    })),
+  };
+}
+
+describe('ShopifyAdapter.rollback — image_dimensions', () => {
+  afterEach(() => _resetInjections());
+
+  it('PUTs old dimensions from colon-separated before_value', async () => {
+    const calls: { url: string; method: string; body?: string }[] = [];
+    _injectFetch(async (url, init) => {
+      calls.push({ url, method: init?.method ?? 'GET', body: init?.body as string });
+      return mockResponse(200, { image: { id: 99, width: 400, height: 300 } });
+    });
+
+    const adapter = new ShopifyAdapter();
+    await adapter.rollback(makePatchManifest([
+      { field: 'image_dimensions', before_value: '42:99:400:300' },
+    ]));
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].method, 'PUT');
+    assert.ok(calls[0].url.includes('/products/42/images/99.json'));
+    const body = JSON.parse(calls[0].body ?? '{}') as { image: { width: number; height: number } };
+    assert.equal(body.image.width,  400);
+    assert.equal(body.image.height, 300);
+  });
+
+  it('reverses patches in reverse order', async () => {
+    const urls: string[] = [];
+    _injectFetch(async (url) => {
+      urls.push(url);
+      return mockResponse(200, {});
+    });
+
+    const adapter = new ShopifyAdapter();
+    await adapter.rollback(makePatchManifest([
+      { field: 'image_dimensions', before_value: '1:10:100:200', url: 'https://mystore.myshopify.com/products/a' },
+      { field: 'image_dimensions', before_value: '2:20:300:400', url: 'https://mystore.myshopify.com/products/b' },
+    ]));
+
+    // Should be reversed: product 2 first, then product 1
+    assert.ok(urls[0].includes('/products/2/images/20'), `first call should be product 2, got: ${urls[0]}`);
+    assert.ok(urls[1].includes('/products/1/images/10'), `second call should be product 1, got: ${urls[1]}`);
+  });
+
+  it('skips patches where before_value is null', async () => {
+    const calls: { url: string }[] = [];
+    _injectFetch(async (url) => {
+      calls.push({ url });
+      return mockResponse(200, {});
+    });
+
+    const adapter = new ShopifyAdapter();
+    await adapter.rollback(makePatchManifest([
+      { field: 'image_dimensions', before_value: null },
+      { field: 'image_dimensions', before_value: '42:99:400:300' },
+    ]));
+
+    assert.equal(calls.length, 1, 'only the non-null before_value should be processed');
+  });
+
+  it('throws with all errors collected when a PUT fails', async () => {
+    _injectFetch(seqFetch([
+      { status: 422, body: { errors: 'bad' } },
+    ]));
+
+    const adapter = new ShopifyAdapter();
+    let threw = false;
+    let errMsg = '';
+    try {
+      await adapter.rollback(makePatchManifest([
+        { field: 'image_dimensions', before_value: '42:99:400:300' },
+      ]));
+    } catch (err) {
+      threw = true;
+      errMsg = err instanceof Error ? err.message : String(err);
+    }
+
+    assert.equal(threw, true, 'rollback should throw when PUT fails');
+    assert.ok(errMsg.includes('422'), `error should include status code, got: ${errMsg}`);
+  });
+
+  it('throws when before_value string is malformed', async () => {
+    const adapter = new ShopifyAdapter();
+    let threw = false;
+    let errMsg = '';
+    try {
+      await adapter.rollback(makePatchManifest([
+        { field: 'image_dimensions', before_value: 'malformed-no-colons' },
+      ]));
+    } catch (err) {
+      threw = true;
+      errMsg = err instanceof Error ? err.message : String(err);
+    }
+    assert.equal(threw, true);
+    assert.ok(errMsg.includes('malformed'), `error should mention malformed, got: ${errMsg}`);
+  });
+
+  it('stubs unknown fields (logs, does not throw)', async () => {
+    const adapter = new ShopifyAdapter();
+    let threw = false;
+    try {
+      await adapter.rollback(makePatchManifest([
+        { field: 'canonical', before_value: 'https://example.com/' },
+      ]));
+    } catch { threw = true; }
+    assert.equal(threw, false, 'unknown field should not throw');
   });
 });
