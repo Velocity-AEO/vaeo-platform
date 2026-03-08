@@ -334,28 +334,104 @@ async function fetchImageDimensions(
   return { width: w, height: h };
 }
 
+// ── resolveImageIds ───────────────────────────────────────────────────────────
+
+/**
+ * Given a CDN image src URL, finds the Shopify product and image IDs.
+ * Calls GET /products.json?src={src} — returns the first matching product.
+ * Returns null if not found or API call fails.
+ * Never throws.
+ */
+async function resolveImageIds(
+  host:    string,
+  headers: Record<string, string>,
+  imgSrc:  string,
+  fetcher: typeof shopifyFetch = shopifyFetch,
+): Promise<{ product_id: string; image_id: string } | null> {
+  try {
+    const url = `https://${host}/admin/api/2024-01/products.json?src=${encodeURIComponent(imgSrc)}&fields=id,images`;
+    const res = await fetcher(url, { method: 'GET', headers });
+    if (!res.ok) return null;
+
+    const data = await res.json() as {
+      products?: Array<{
+        id:     number;
+        images: Array<{ id: number; src: string }>;
+      }>;
+    };
+
+    for (const product of data.products ?? []) {
+      for (const image of product.images ?? []) {
+        // Normalize both URLs before comparing — CDN URLs may differ in
+        // query params (?v=, ?width=) but share the same base path
+        const normalize = (s: string) => s.split('?')[0];
+        if (normalize(image.src) === normalize(imgSrc)) {
+          return {
+            product_id: String(product.id),
+            image_id:   String(image.id),
+          };
+        }
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 // ── Image dimensions fix ──────────────────────────────────────────────────────
 
 /**
  * Injects width + height onto a Shopify product image via the Admin API.
  * after_value fields: product_id, image_id, width, height.
+ * If product_id/image_id are absent, resolves them from img_src via resolveImageIds.
  * Captures before-state (old width/height) for rollback.
  */
 async function applyImageDimensionsFix(
-  request: ShopifyFixRequest,
   host:    string,
   headers: Record<string, string>,
-): Promise<Record<string, unknown>> {
-  const productId = String(request.after_value['product_id'] ?? request.after_value['shopify_product_id'] ?? '');
-  const imageId   = String(request.after_value['image_id']   ?? request.after_value['shopify_image_id']   ?? '');
-  const width     = Number(request.after_value['width']);
-  const height    = Number(request.after_value['height']);
+  request: ShopifyFixRequest,
+  fetcher: typeof shopifyFetch = shopifyFetch,
+): Promise<ShopifyFixResult> {
+  const sandbox = request.sandbox ?? true;
+  const av      = request.after_value;
 
-  if (!productId || !imageId) {
-    throw new Error('image_dimensions fix requires after_value.product_id and after_value.image_id');
+  let productId = av['product_id'] as string | undefined;
+  let imageId   = av['image_id']   as string | undefined;
+  const width   = av['width']      as number | undefined;
+  const height  = av['height']     as number | undefined;
+  const imgSrc  = av['img_src']    as string | undefined;
+
+  // If product_id/image_id not provided, resolve from img_src
+  if ((!productId || !imageId) && imgSrc) {
+    const resolved = await resolveImageIds(host, headers, imgSrc, fetcher);
+    if (!resolved) {
+      return {
+        action_id: request.action_id,
+        success:   false,
+        fix_type:  request.fix_type,
+        sandbox,
+        error:     `image_dimensions: could not resolve product_id/image_id from src "${imgSrc}"`,
+      };
+    }
+    productId = resolved.product_id;
+    imageId   = resolved.image_id;
   }
-  if (!width || !height) {
-    throw new Error('image_dimensions fix requires after_value.width and after_value.height');
+
+  if (!productId || !imageId || !width || !height) {
+    const missing = [
+      !productId && 'product_id',
+      !imageId   && 'image_id',
+      !width     && 'width',
+      !height    && 'height',
+    ].filter(Boolean).join(', ');
+    return {
+      action_id: request.action_id,
+      success:   false,
+      fix_type:  request.fix_type,
+      sandbox,
+      error:     `image_dimensions: missing required fields: ${missing}`,
+    };
   }
 
   // Capture before-state for rollback
@@ -364,21 +440,39 @@ async function applyImageDimensionsFix(
   // PUT updated dimensions
   const putUrl = `https://${host}/admin/api/2024-01/products/${productId}/images/${imageId}.json`;
   console.log(`[shopify] PUT ${putUrl} → width=${width}, height=${height}`);
-  const putRes = await shopifyFetch(putUrl, {
+  const putRes = await fetcher(putUrl, {
     method:  'PUT',
     headers,
     body:    JSON.stringify({ image: { id: parseInt(imageId, 10), width, height } }),
   });
   if (!putRes.ok) {
     const text = await putRes.text();
-    throw new Error(`image_dimensions PUT failed (${putRes.status}): ${text}`);
+    return {
+      action_id: request.action_id,
+      success:   false,
+      fix_type:  request.fix_type,
+      sandbox,
+      error:     `image_dimensions PUT failed (${putRes.status}): ${text}`,
+    };
   }
 
-  return {
+  const beforeValue: Record<string, unknown> = {
     product_id: productId,
     image_id:   imageId,
     old_width:  before?.width  ?? null,
     old_height: before?.height ?? null,
+  };
+
+  if (request.action_id && Object.keys(beforeValue).length > 0) {
+    persistRollbackManifest(request.action_id, beforeValue).catch(() => {});
+  }
+
+  return {
+    action_id:    request.action_id,
+    success:      true,
+    fix_type:     request.fix_type,
+    sandbox,
+    before_value: beforeValue,
   };
 }
 
@@ -509,7 +603,7 @@ export async function applyFix(request: ShopifyFixRequest): Promise<ShopifyFixRe
     } else if (request.fix_type === 'image_alt') {
       beforeValue = await applyImageAltFix(request, host, headers);
     } else if (request.fix_type === 'image_dimensions') {
-      beforeValue = await applyImageDimensionsFix(request, host, headers);
+      return await applyImageDimensionsFix(host, headers, request);
     } else {
       process.stderr.write(
         `[shopify-adapter] fix:stub — fix_type=${request.fix_type} not yet wired, returning success=true\n`,

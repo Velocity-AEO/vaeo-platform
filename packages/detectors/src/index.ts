@@ -405,7 +405,20 @@ export function detectMissingImageDimensions(
       .map((img) =>
         iss(ctx, r.url, 'IMG_DIMENSIONS_MISSING', 'images', 2, true,
           { image_src: img.src, width: img.width, height: img.height },
-          { action: 'inject_dimensions_from_metadata', image_src: img.src },
+          {
+            action:  'inject_dimensions_from_metadata',
+            img_src: img.src,
+            width:   img.width  ?? null,
+            height:  img.height ?? null,
+            // after_value shape the adapter expects:
+            // product_id and image_id intentionally omitted —
+            // adapter resolves them via API using img_src
+            after_value: {
+              img_src: img.src,
+              width:   img.width  ?? null,
+              height:  img.height ?? null,
+            },
+          },
         ),
       ),
   );
