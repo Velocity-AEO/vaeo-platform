@@ -269,6 +269,25 @@ export async function fetchSitemapUrls(
   }
 }
 
+// ── Shopify CDN dimension parsing ─────────────────────────────────────────────
+
+/**
+ * Parse intrinsic width from Shopify CDN URL when HTML attributes are missing.
+ * Height is calculated from aspect ratio at patch time.
+ */
+function extractIntrinsicDimensions(src: string): { width: number | null; height: number | null } {
+  try {
+    const url   = new URL(src);
+    const width = url.searchParams.get('width');
+    return {
+      width:  width ? parseInt(width, 10) : null,
+      height: null,
+    };
+  } catch {
+    return { width: null, height: null };
+  }
+}
+
 // ── Real crawler implementation ───────────────────────────────────────────────
 
 async function runRealCrawler(opts: {
@@ -306,13 +325,19 @@ async function runRealCrawler(opts: {
       const images: ImageResult[] = $('img').map((_i, el) => {
         const src = $(el).attr('src') ?? '';
         if (!src) return null;
-        const w = $(el).attr('width');
-        const h = $(el).attr('height');
+        const wAttr = $(el).attr('width');
+        const hAttr = $(el).attr('height');
+        const attrWidth  = wAttr != null ? parseInt(wAttr, 10) : null;
+        const attrHeight = hAttr != null ? parseInt(hAttr, 10) : null;
+        // Fall back to CDN URL dimensions when HTML attributes are absent
+        const cdn = (attrWidth === null || attrHeight === null)
+          ? extractIntrinsicDimensions(src)
+          : { width: null, height: null };
         return {
           src,
           alt:    $(el).attr('alt') ?? null,
-          width:  w != null ? parseInt(w, 10) : null,
-          height: h != null ? parseInt(h, 10) : null,
+          width:  attrWidth  ?? cdn.width,
+          height: attrHeight ?? cdn.height,
         };
       }).get().filter(Boolean) as ImageResult[];
 

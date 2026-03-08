@@ -1,0 +1,9 @@
+{
+	"id": "GNQjuZardyv520x",
+	"json": "{\"id\":\"GNQjuZardyv520x\",\"url\":\"https://cococabanalife.com/search\",\"loadedUrl\":\"https://cococabanalife.com/search\",\"uniqueKey\":\"https://cococabanalife.com/search\",\"method\":\"GET\",\"noRetry\":false,\"retryCount\":0,\"errorMessages\":[],\"headers\":{},\"userData\":{\"__crawlee\":{\"crawlDepth\":1,\"enqueueStrategy\":\"same-origin\",\"state\":4}},\"handledAt\":\"2026-03-07T22:52:54.964Z\"}",
+	"method": "GET",
+	"orderNo": null,
+	"retryCount": 0,
+	"uniqueKey": "https://cococabanalife.com/search",
+	"url": "https://cococabanalife.com/search"
+}
