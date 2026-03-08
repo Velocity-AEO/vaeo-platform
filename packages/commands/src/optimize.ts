@@ -94,6 +94,11 @@ export interface OptimizeCommandOps {
    * Non-blocking — never throws. Optional (skipped in tests that don't inject it).
    */
   writeRollbackManifest?: (item: ActionQueueItem) => Promise<void>;
+  /**
+   * Schedule post-deploy monitoring checks (http_status, lighthouse, playwright, gsc_indexing).
+   * Non-blocking — never throws. Optional (skipped in tests that don't inject it).
+   */
+  scheduleMonitor?: (runId: string, tenantId: string, siteId: string) => Promise<void>;
 }
 
 // ── Default (real) ops ────────────────────────────────────────────────────────
@@ -415,6 +420,15 @@ const realWriteRollbackManifest: NonNullable<OptimizeCommandOps['writeRollbackMa
   }
 };
 
+const realScheduleMonitor: NonNullable<OptimizeCommandOps['scheduleMonitor']> = async (runId, tenantId, siteId) => {
+  try {
+    const { scheduleMonitorChecks } = await import('./monitor-scheduler.js');
+    await scheduleMonitorChecks(runId, tenantId, siteId);
+  } catch (err) {
+    process.stderr.write(`[optimize] scheduleMonitor failed for run=${runId}: ${String(err)}\n`);
+  }
+};
+
 /**
  * Applies a fix in sandbox mode:
  *   1. applyPatch() — stores rollback manifest, calls patch-engine adapter stub
@@ -533,8 +547,11 @@ export async function runOptimize(
     runValidators: realRunValidators,
     deployFix:     realDeployFix,
     markStatus:    realMarkStatus,
-    // writeRollbackManifest: only wired in production; tests inject via _testOps
-    ...(_testOps === undefined ? { writeRollbackManifest: realWriteRollbackManifest } : {}),
+    // writeRollbackManifest + scheduleMonitor: only wired in production; tests inject via _testOps
+    ...(_testOps === undefined ? {
+      writeRollbackManifest: realWriteRollbackManifest,
+      scheduleMonitor:       realScheduleMonitor,
+    } : {}),
     ..._testOps,
   };
 
@@ -693,6 +710,11 @@ export async function runOptimize(
     });
     try { await ops.markStatus(item.id, item.tenant_id, 'deployed'); } catch { /* non-blocking */ }
     deployed++;
+
+    // Schedule post-deploy monitoring checks (non-blocking)
+    if (ops.scheduleMonitor) {
+      ops.scheduleMonitor(item.run_id, item.tenant_id, item.site_id).catch(() => { /* non-blocking */ });
+    }
   }
 
   // ── Determine overall status ─────────────────────────────────────────────────

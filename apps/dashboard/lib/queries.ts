@@ -256,6 +256,23 @@ export async function getCommandCenterItems(): Promise<CommandCenterRow[]> {
   }));
 }
 
+// ── Monitor regressions ────────────────────────────────────────────────────────
+
+/**
+ * Count of monitor_results detected in the last 7 days for this tenant.
+ * Used by the dashboard home regressions stat card.
+ */
+export async function getRegressionsCount(tenantId = '00000000-0000-0000-0000-000000000001'): Promise<number> {
+  const db    = createServerClient();
+  const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const { count } = await db
+    .from('monitor_results')
+    .select('id', { count: 'exact', head: true })
+    .eq('tenant_id', tenantId)
+    .gte('detected_at', since);
+  return count ?? 0;
+}
+
 export async function getCommandCenterStats(): Promise<CommandCenterStats> {
   const db = createServerClient();
 

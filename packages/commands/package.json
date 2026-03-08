@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --import tsx/esm --test src/connect.test.ts src/crawl.test.ts src/audit.test.ts src/optimize.test.ts src/verify.test.ts src/promote.test.ts src/rollback.test.ts"
+    "test": "node --import tsx/esm --test src/connect.test.ts src/crawl.test.ts src/audit.test.ts src/optimize.test.ts src/verify.test.ts src/promote.test.ts src/rollback.test.ts src/monitor.test.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.98.0"

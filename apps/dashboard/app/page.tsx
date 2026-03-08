@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { getDashboardStats, getRecentRuns } from '@/lib/queries';
+import { getDashboardStats, getRecentRuns, getRegressionsCount } from '@/lib/queries';
 import StatusBadge from '@/components/StatusBadge';
 
 function StatCard({
@@ -35,18 +35,25 @@ function StatCard({
 }
 
 export default async function DashboardPage() {
-  const [stats, runs] = await Promise.all([getDashboardStats(), getRecentRuns(20)]);
+  const [stats, runs, regressionsCount] = await Promise.all([
+    getDashboardStats(),
+    getRecentRuns(20),
+    getRegressionsCount(),
+  ]);
 
   return (
     <>
       <h1 className="text-xl font-semibold mb-6">Overview</h1>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-10">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 mb-10">
         <StatCard label="Runs today"           value={stats.total_runs_today} />
         <StatCard label="Fixes deployed today" value={stats.fixes_deployed_today} />
         <StatCard label="Pending approval"     value={stats.fixes_pending_approval} highlight />
-        <StatCard label="Failed fixes (24h)"    value={stats.active_regressions}    danger />
+        <StatCard label="Failed fixes (24h)"   value={stats.active_regressions}    danger />
+        <Link href="/runs" className="block">
+          <StatCard label="Regressions (7d)"   value={regressionsCount}            danger />
+        </Link>
       </div>
 
       {/* Recent runs table */}
