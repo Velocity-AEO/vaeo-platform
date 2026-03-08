@@ -1,10 +1,11 @@
 import Link from 'next/link';
 
 const NAV = [
-  { href: '/',      label: 'Dashboard' },
-  { href: '/runs',  label: 'Runs'      },
-  { href: '/sites', label: 'Sites'     },
-  { href: '/queue', label: 'Command Center' },
+  { href: '/',           label: 'Dashboard'      },
+  { href: '/runs',       label: 'Runs'           },
+  { href: '/sites',      label: 'Sites'          },
+  { href: '/queue',      label: 'Command Center' },
+  { href: '/onboarding', label: 'Connect Site'   },
 ];
 
 export default function Header() {
