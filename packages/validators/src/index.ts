@@ -13,6 +13,11 @@
 // schema-dts provides compile-time types for schema.org structured data
 import type { Product, Organization, Article } from 'schema-dts';
 
+import { validateAxe, type SimpleAxeResult, type AxePageRunner }                          from './axe.js';
+import { validateVisualDiff, type SimpleVisualDiffResult, type SimpleScreenshotCapture, type SimpleImageCompare } from './visual-diff.js';
+
+export type { SimpleAxeResult, AxePageRunner, SimpleVisualDiffResult, SimpleScreenshotCapture, SimpleImageCompare };
+
 // Suppress unused import warnings — these are used for type documentation only
 void (undefined as unknown as Product);
 void (undefined as unknown as Organization);
@@ -44,18 +49,28 @@ export interface W3cResult {
 }
 
 export interface ValidatorInput {
-  url:             string;
-  html?:           string;         // for W3C
-  schema_blocks?:  string[];       // for schema validator
-  run_lighthouse?: boolean;        // default true
+  url:              string;
+  html?:            string;         // for W3C
+  schema_blocks?:   string[];       // for schema validator
+  run_lighthouse?:  boolean;        // default true
+  run_axe?:         boolean;        // default true
+  run_visual_diff?: boolean;        // default false — opt-in
+  baseline_path?:   string;         // for visual_diff
+  mask_selectors?:  string[];       // for visual_diff
+  // Test injectables — not used in production
+  _axeRunner?:          AxePageRunner;
+  _captureScreenshot?:  SimpleScreenshotCapture;
+  _compareImages?:      SimpleImageCompare;
 }
 
 export interface ValidatorResult {
   passed:     boolean;
   validators: {
-    schema:     SchemaResult     | null;
-    lighthouse: LighthouseResult | null;
-    w3c:        W3cResult        | null;
+    schema:      SchemaResult          | null;
+    lighthouse:  LighthouseResult      | null;
+    w3c:         W3cResult             | null;
+    axe:         SimpleAxeResult       | null;
+    visual_diff: SimpleVisualDiffResult | null;
   };
   blocked_by: string[];
   run_at:     string;
@@ -257,24 +272,35 @@ export async function validateW3c(
 // ── runValidators (main export) ───────────────────────────────────────────────
 
 /**
- * Runs the validation ladder in order: schema → lighthouse → w3c.
+ * Runs the validation ladder in order: schema → lighthouse → w3c → axe → visual_diff.
  *
- * A validator only runs when its required input is present:
- *   - schema: requires schema_blocks (non-empty array)
- *   - lighthouse: requires run_lighthouse=true (default) — skips if no API key
- *   - w3c: requires html string
+ * A validator only runs when its required input is present / opt-in flag is set:
+ *   - schema:      requires schema_blocks (non-empty array)
+ *   - lighthouse:  run_lighthouse=true (default); skips if no API key
+ *   - w3c:         requires html string
+ *   - axe:         run_axe=true (default); skips if browser unavailable
+ *   - visual_diff: run_visual_diff=true (opt-in, default false)
  *
- * blocked_by lists the names of validators that did not pass (not skipped).
+ * blocked_by lists validators that did not pass (not skipped ones).
  * passed = true only when blocked_by is empty.
  */
 export async function runValidators(input: ValidatorInput): Promise<ValidatorResult> {
-  const { url, html, schema_blocks, run_lighthouse = true } = input;
+  const {
+    url, html, schema_blocks,
+    run_lighthouse  = true,
+    run_axe         = true,
+    run_visual_diff = false,
+    baseline_path, mask_selectors,
+    _axeRunner, _captureScreenshot, _compareImages,
+  } = input;
 
   const blocked_by: string[] = [];
 
-  let schemaResult:     SchemaResult     | null = null;
-  let lighthouseResult: LighthouseResult | null = null;
-  let w3cResult:        W3cResult        | null = null;
+  let schemaResult:     SchemaResult          | null = null;
+  let lighthouseResult: LighthouseResult      | null = null;
+  let w3cResult:        W3cResult             | null = null;
+  let axeResult:        SimpleAxeResult       | null = null;
+  let visualDiffResult: SimpleVisualDiffResult | null = null;
 
   // 1. Schema — local, no API
   if (schema_blocks && schema_blocks.length > 0) {
@@ -298,10 +324,36 @@ export async function runValidators(input: ValidatorInput): Promise<ValidatorRes
     }
   }
 
+  // 4. Axe accessibility — skippable
+  if (run_axe) {
+    axeResult = await validateAxe({ url }, _axeRunner);
+    if (!axeResult.passed && !axeResult.skipped) {
+      blocked_by.push('axe');
+    }
+  }
+
+  // 5. Visual diff — opt-in, skippable
+  if (run_visual_diff) {
+    visualDiffResult = await validateVisualDiff(
+      { url, baseline_path, mask_selectors },
+      _captureScreenshot,
+      _compareImages,
+    );
+    if (!visualDiffResult.passed && !visualDiffResult.skipped) {
+      blocked_by.push('visual_diff');
+    }
+  }
+
   return {
     passed:     blocked_by.length === 0,
-    validators: { schema: schemaResult, lighthouse: lighthouseResult, w3c: w3cResult },
+    validators: {
+      schema:      schemaResult,
+      lighthouse:  lighthouseResult,
+      w3c:         w3cResult,
+      axe:         axeResult,
+      visual_diff: visualDiffResult,
+    },
     blocked_by,
-    run_at:     new Date().toISOString(),
+    run_at: new Date().toISOString(),
   };
 }

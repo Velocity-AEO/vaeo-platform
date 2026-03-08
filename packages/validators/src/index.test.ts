@@ -15,6 +15,9 @@ import {
   runValidators,
   type LighthouseFetcher,
   type W3cFetcher,
+  type AxePageRunner,
+  type SimpleScreenshotCapture,
+  type SimpleImageCompare,
 } from './index.js';
 
 // ── validateSchema ─────────────────────────────────────────────────────────────
@@ -147,5 +150,62 @@ describe('runValidators', () => {
     assert.ok(result.blocked_by.includes('schema'));
     assert.ok(result.validators.schema !== null);
     assert.equal(result.validators.schema?.passed, false);
+  });
+
+  // ── Axe integration ──────────────────────────────────────────────────────────
+
+  it('run_axe=true, critical violation → passed=false, blocked_by includes "axe"', async () => {
+    const axeRunner: AxePageRunner = async () => ({
+      violations: [{ id: 'image-alt', impact: 'critical', description: 'Missing alt', nodes: [1, 2] }],
+    });
+    const result = await runValidators({
+      url:            'https://example.com',
+      run_lighthouse: false,
+      run_axe:        true,
+      _axeRunner:     axeRunner,
+    });
+    assert.equal(result.passed, false);
+    assert.ok(result.blocked_by.includes('axe'));
+    assert.ok(result.validators.axe !== null);
+    assert.equal(result.validators.axe?.critical_count, 1);
+  });
+
+  it('run_axe=false → validators.axe is null', async () => {
+    const result = await runValidators({
+      url:            'https://example.com',
+      run_lighthouse: false,
+      run_axe:        false,
+    });
+    assert.equal(result.validators.axe, null);
+    assert.ok(!result.blocked_by.includes('axe'));
+  });
+
+  // ── Visual diff integration ───────────────────────────────────────────────────
+
+  it('run_visual_diff=true, diff over threshold → passed=false, blocked_by includes "visual_diff"', async () => {
+    const capture: SimpleScreenshotCapture = async () => Buffer.from('screenshot');
+    const compare: SimpleImageCompare      = () => ({ diff: 10, totalPixels: 100 }); // 10% > 2%
+    const result = await runValidators({
+      url:                 'https://example.com',
+      run_lighthouse:      false,
+      run_axe:             false,
+      run_visual_diff:     true,
+      _captureScreenshot:  capture,
+      _compareImages:      compare,
+      // no baseline_path → is_baseline=true → skipped from blocked_by
+    });
+    // No baseline → is_baseline=true → passed=true (first run always saves baseline)
+    assert.equal(result.validators.visual_diff?.is_baseline, true);
+    assert.ok(!result.blocked_by.includes('visual_diff'));
+  });
+
+  it('run_visual_diff=false (default) → validators.visual_diff is null', async () => {
+    const result = await runValidators({
+      url:            'https://example.com',
+      run_lighthouse: false,
+      run_axe:        false,
+    });
+    assert.equal(result.validators.visual_diff, null);
+    assert.ok(!result.blocked_by.includes('visual_diff'));
   });
 });

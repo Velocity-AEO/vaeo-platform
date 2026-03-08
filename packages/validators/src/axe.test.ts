@@ -31,6 +31,7 @@ import { createHash } from 'node:crypto';
 
 import {
   runAxe,
+  validateAxe,
   cacheKey,
   htmlHash,
   normaliseImpact,
@@ -40,6 +41,8 @@ import {
   type AxeRunner,
   type AxeCacheOps,
   type AxeRunResult,
+  type AxePageRunner,
+  type AxeRawResult,
 } from './axe.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -457,5 +460,107 @@ describe('runAxe — cache write', () => {
     assert.equal(cachedKey, cacheKey(r));
     assert.ok(cachedValue);
     assert.equal(cachedValue!.passed, true);
+  });
+});
+
+// ── validateAxe (simple URL-based wrapper) ────────────────────────────────────
+
+function makePageRunner(resp: AxeRawResult | Error): AxePageRunner {
+  return async () => {
+    if (resp instanceof Error) throw resp;
+    return resp;
+  };
+}
+
+function rawViolation(id: string, impact: string, nodes = 1): AxeRawResult['violations'][0] {
+  return { id, impact, description: `${id} description`, nodes: Array.from({ length: nodes }) };
+}
+
+describe('validateAxe — no violations', () => {
+  it('returns passed=true, critical_count=0', async () => {
+    const result = await validateAxe(
+      { url: 'https://example.com' },
+      makePageRunner({ violations: [] }),
+    );
+    assert.equal(result.passed, true);
+    assert.equal(result.critical_count, 0);
+    assert.equal(result.serious_count, 0);
+    assert.equal(result.violations.length, 0);
+    assert.equal(result.validator, 'axe');
+  });
+});
+
+describe('validateAxe — critical violation', () => {
+  it('returns passed=false, critical_count=1', async () => {
+    const result = await validateAxe(
+      { url: 'https://example.com' },
+      makePageRunner({ violations: [rawViolation('image-alt', 'critical', 3)] }),
+    );
+    assert.equal(result.passed, false);
+    assert.equal(result.critical_count, 1);
+    assert.equal(result.serious_count, 0);
+    assert.equal(result.violations[0]!.nodes_affected, 3);
+  });
+});
+
+describe('validateAxe — serious violation', () => {
+  it('returns passed=false, serious_count=1', async () => {
+    const result = await validateAxe(
+      { url: 'https://example.com' },
+      makePageRunner({ violations: [rawViolation('label', 'serious')] }),
+    );
+    assert.equal(result.passed, false);
+    assert.equal(result.serious_count, 1);
+    assert.equal(result.critical_count, 0);
+  });
+});
+
+describe('validateAxe — non-blocking violations only', () => {
+  it('minor + moderate → passed=true', async () => {
+    const result = await validateAxe(
+      { url: 'https://example.com' },
+      makePageRunner({
+        violations: [
+          rawViolation('color-contrast', 'moderate'),
+          rawViolation('skip-link', 'minor'),
+        ],
+      }),
+    );
+    assert.equal(result.passed, true);
+    assert.equal(result.violations.length, 2);
+    assert.equal(result.critical_count, 0);
+    assert.equal(result.serious_count, 0);
+  });
+});
+
+describe('validateAxe — mixed violations', () => {
+  it('critical + serious + moderate → correct counts', async () => {
+    const result = await validateAxe(
+      { url: 'https://example.com' },
+      makePageRunner({
+        violations: [
+          rawViolation('image-alt',      'critical', 2),
+          rawViolation('label',          'serious',  1),
+          rawViolation('color-contrast', 'moderate', 5),
+        ],
+      }),
+    );
+    assert.equal(result.passed, false);
+    assert.equal(result.critical_count, 1);
+    assert.equal(result.serious_count, 1);
+    assert.equal(result.violations.length, 3);
+  });
+});
+
+describe('validateAxe — browser launch failure', () => {
+  it('returns skipped=true, passed=true without throwing', async () => {
+    const result = await validateAxe(
+      { url: 'https://example.com' },
+      makePageRunner(new Error('Playwright not installed')),
+    );
+    assert.equal(result.passed, true);
+    assert.equal(result.skipped, true);
+    assert.equal(result.violations.length, 0);
+    assert.equal(result.validator, 'axe');
   });
 });

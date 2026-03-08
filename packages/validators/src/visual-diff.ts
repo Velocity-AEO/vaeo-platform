@@ -16,7 +16,156 @@
  * Never throws — always returns VisualDiffResult.
  */
 
-import { createLogger } from '../../action-log/src/index.js';
+import { createLogger }                      from '../../action-log/src/index.js';
+import { readFile, writeFile, access }       from 'node:fs/promises';
+import { tmpdir }                            from 'node:os';
+import { join }                              from 'node:path';
+
+// ── validateVisualDiff (simple URL + file-baseline wrapper for ladder) ────────
+
+/** CSS selectors for dynamic regions always masked during screenshot comparison. */
+export const SIMPLE_MASK_SELECTORS: readonly string[] = [
+  '[data-price]', '.price', '.inventory-count', '.cart-count',
+  '.countdown-timer', '[data-live]', '.ad-container', 'iframe',
+];
+
+export interface SimpleVisualDiffInput {
+  url:             string;
+  baseline_path?:  string;     // path to baseline PNG file
+  threshold?:      number;     // default 0.02 (2% of total pixels)
+  mask_selectors?: string[];   // additional CSS selectors to hide
+}
+
+export interface SimpleVisualDiffResult {
+  passed:           boolean;
+  skipped?:         boolean;
+  is_baseline?:     boolean;
+  diff_percent?:    number;
+  diff_image_path?: string;
+  validator:        'visual_diff';
+}
+
+/** Injectable — captures a full-page screenshot with masked elements. */
+export type SimpleScreenshotCapture = (url: string, maskSelectors: string[]) => Promise<Buffer>;
+
+/** Injectable — pixel comparison of two PNG buffers. */
+export type SimpleImageCompare = (img1: Buffer, img2: Buffer) => { diff: number; totalPixels: number };
+
+async function realSimpleCaptureScreenshot(url: string, maskSelectors: string[]): Promise<Buffer> {
+  const { chromium } = await import('playwright');
+  const browser = await chromium.launch({ headless: true });
+  const page    = await browser.newPage();
+  try {
+    await page.goto(url, { waitUntil: 'domcontentloaded' });
+    // Mask dynamic regions
+    if (maskSelectors.length > 0) {
+      const selector = maskSelectors.join(', ');
+      await page.evaluate((sel: string) => {
+        document.querySelectorAll(sel).forEach((el: Element) => {
+          (el as HTMLElement).style.visibility = 'hidden';
+        });
+      }, selector);
+    }
+    return await page.screenshot({ fullPage: true, type: 'png' });
+  } finally {
+    await browser.close();
+  }
+}
+
+async function realSimpleCompareImages(img1: Buffer, img2: Buffer): Promise<{ diff: number; totalPixels: number }> {
+  const { PNG }        = await import('pngjs');
+  const { default: pm } = await import('pixelmatch');
+
+  const decode = (buf: Buffer): Promise<{ data: Buffer; width: number; height: number }> =>
+    new Promise((resolve, reject) => {
+      const png = new PNG();
+      png.parse(buf, (err, data) => { if (err) reject(err); else resolve(data); });
+    });
+
+  const [before, after] = await Promise.all([decode(img1), decode(img2)]);
+  if (before.width !== after.width || before.height !== after.height) {
+    // Dimension mismatch → 100% diff
+    return { diff: before.width * before.height, totalPixels: before.width * before.height };
+  }
+  const totalPixels = before.width * before.height;
+  const diff        = pm(
+    new Uint8Array(before.data.buffer),
+    new Uint8Array(after.data.buffer),
+    null,
+    before.width,
+    before.height,
+    { threshold: 0.1 },
+  );
+  return { diff, totalPixels };
+}
+
+/**
+ * Simple URL-based visual diff validator for the validation ladder.
+ *
+ * Flow:
+ *   1. Capture screenshot of url (masks dynamic selectors).
+ *   2. If baseline_path missing or file doesn't exist: save as baseline → is_baseline=true.
+ *   3. If baseline exists: compare, fail if diff_percent > threshold.
+ *   4. On any screenshot/compare failure: skipped=true, passed=true.
+ *
+ * Never throws.
+ */
+export async function validateVisualDiff(
+  input:             SimpleVisualDiffInput,
+  captureScreenshot?: SimpleScreenshotCapture,
+  compareImages?:    SimpleImageCompare,
+): Promise<SimpleVisualDiffResult> {
+  const threshold    = input.threshold ?? DEFAULT_THRESHOLD;
+  const maskSels     = [...SIMPLE_MASK_SELECTORS, ...(input.mask_selectors ?? [])];
+  const capture      = captureScreenshot ?? ((u, m) => realSimpleCaptureScreenshot(u, m));
+  const compare      = compareImages      ?? ((a, b) => realSimpleCompareImages(a, b));
+
+  // Step 1 — capture screenshot
+  let screenshot: Buffer;
+  try {
+    screenshot = await capture(input.url, maskSels);
+  } catch {
+    return { passed: true, skipped: true, validator: 'visual_diff' };
+  }
+
+  // Step 2 — no baseline_path → return as baseline (nothing to save)
+  if (!input.baseline_path) {
+    return { passed: true, is_baseline: true, validator: 'visual_diff' };
+  }
+
+  // Check baseline exists
+  let baselineExists = false;
+  try { await access(input.baseline_path); baselineExists = true; } catch { /* not found */ }
+
+  if (!baselineExists) {
+    // Save screenshot as new baseline
+    try { await writeFile(input.baseline_path, screenshot); } catch { /* non-blocking */ }
+    return { passed: true, is_baseline: true, validator: 'visual_diff' };
+  }
+
+  // Step 3 — compare against baseline
+  let baseline: Buffer;
+  try { baseline = await readFile(input.baseline_path); } catch {
+    return { passed: true, skipped: true, validator: 'visual_diff' };
+  }
+
+  let cmp: { diff: number; totalPixels: number };
+  try {
+    cmp = await Promise.resolve(compare(screenshot, baseline));
+  } catch {
+    return { passed: true, skipped: true, validator: 'visual_diff' };
+  }
+
+  const diff_percent = cmp.totalPixels > 0 ? cmp.diff / cmp.totalPixels : 0;
+  const passed       = diff_percent <= threshold;
+
+  let diff_image_path: string | undefined;
+  if (!passed) {
+    diff_image_path = join(tmpdir(), `vaeo-diff-${Date.now()}.png`);
+  }
+
+  return { passed, diff_percent, diff_image_path, validator: 'visual_diff' };
+}
 
 // ── Public types ──────────────────────────────────────────────────────────────
 

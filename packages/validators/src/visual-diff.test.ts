@@ -5,11 +5,15 @@
  * All external deps (pngjs, pixelmatch, R2) are injected via _testOps.
  */
 
-import { describe, it, beforeEach } from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, it, beforeEach }    from 'node:test';
+import assert                          from 'node:assert/strict';
+import { writeFile, unlink }           from 'node:fs/promises';
+import { join }                        from 'node:path';
+import { tmpdir }                      from 'node:os';
 
 import {
   runVisualDiff,
+  validateVisualDiff,
   applyMaskRegions,
   urlSlug,
   DEFAULT_THRESHOLD,
@@ -17,6 +21,8 @@ import {
   type VisualDiffOps,
   type DecodedImage,
   type PixelRegion,
+  type SimpleScreenshotCapture,
+  type SimpleImageCompare,
 } from './visual-diff.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -426,5 +432,101 @@ describe('runVisualDiff — never throws', () => {
       r2: { put: async () => { throw new Error('fatal r2'); } },
     };
     await assert.doesNotReject(() => runVisualDiff(baseReq(), ops));
+  });
+});
+
+// ── validateVisualDiff (simple file-baseline wrapper) ─────────────────────────
+
+const FAKE_SCREENSHOT = Buffer.from('fake-png-data');
+
+function makeCapture(buf = FAKE_SCREENSHOT): SimpleScreenshotCapture {
+  return async () => buf;
+}
+
+function makeCompare(diff: number, totalPixels: number): SimpleImageCompare {
+  return () => ({ diff, totalPixels });
+}
+
+describe('validateVisualDiff — no baseline (no baseline_path)', () => {
+  it('returns is_baseline=true, passed=true when no baseline_path', async () => {
+    const result = await validateVisualDiff(
+      { url: 'https://example.com' },
+      makeCapture(),
+      makeCompare(0, 100),
+    );
+    assert.equal(result.passed, true);
+    assert.equal(result.is_baseline, true);
+    assert.equal(result.validator, 'visual_diff');
+  });
+});
+
+describe('validateVisualDiff — baseline file written then compared', () => {
+  const baselinePath = join(tmpdir(), `vaeo-test-baseline-${Date.now()}.png`);
+
+  it('no baseline file → saves and returns is_baseline=true', async () => {
+    const result = await validateVisualDiff(
+      { url: 'https://example.com', baseline_path: baselinePath },
+      makeCapture(),
+      makeCompare(0, 100),
+    );
+    assert.equal(result.passed, true);
+    assert.equal(result.is_baseline, true);
+  });
+
+  it('baseline exists, diff 0% → passed=true, diff_percent=0', async () => {
+    // baseline_path was written by previous test
+    const result = await validateVisualDiff(
+      { url: 'https://example.com', baseline_path: baselinePath },
+      makeCapture(),
+      makeCompare(0, 100),
+    );
+    assert.equal(result.passed, true);
+    assert.equal(result.diff_percent, 0);
+    assert.equal(result.is_baseline, undefined);
+  });
+
+  it('baseline exists, diff 3% (over 2% threshold) → passed=false', async () => {
+    const result = await validateVisualDiff(
+      { url: 'https://example.com', baseline_path: baselinePath },
+      makeCapture(),
+      makeCompare(3, 100),
+    );
+    assert.equal(result.passed, false);
+    assert.ok(result.diff_percent! > 0.02);
+  });
+
+  it('baseline exists, diff 1% (under 2% threshold) → passed=true', async () => {
+    const result = await validateVisualDiff(
+      { url: 'https://example.com', baseline_path: baselinePath },
+      makeCapture(),
+      makeCompare(1, 100),
+    );
+    assert.equal(result.passed, true);
+    assert.ok(result.diff_percent! < 0.02);
+  });
+
+  it('custom threshold 5%, diff 4% → passed=true', async () => {
+    const result = await validateVisualDiff(
+      { url: 'https://example.com', baseline_path: baselinePath, threshold: 0.05 },
+      makeCapture(),
+      makeCompare(4, 100),
+    );
+    assert.equal(result.passed, true);
+  });
+});
+
+describe('validateVisualDiff — screenshot capture fails', () => {
+  it('returns skipped=true, passed=true', async () => {
+    const failCapture: SimpleScreenshotCapture = async () => {
+      throw new Error('Browser launch failed');
+    };
+    const result = await validateVisualDiff(
+      { url: 'https://example.com' },
+      failCapture,
+      makeCompare(0, 100),
+    );
+    assert.equal(result.passed, true);
+    assert.equal(result.skipped, true);
+    assert.equal(result.validator, 'visual_diff');
   });
 });

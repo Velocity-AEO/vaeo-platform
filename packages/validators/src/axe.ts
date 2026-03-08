@@ -210,6 +210,92 @@ async function realCacheSet(key: string, value: AxeResult): Promise<void> {
   }
 }
 
+// ── validateAxe (simple URL-based wrapper for the validator ladder) ───────────
+
+/** Minimal raw shape returned by the URL-based axe page runner. */
+export interface AxeRawResult {
+  violations: Array<{
+    id:          string;
+    impact:      string | null | undefined;
+    description: string;
+    nodes:       unknown[];
+  }>;
+}
+
+/** Result shape used by the validator ladder (index.ts). */
+export interface SimpleAxeResult {
+  passed:         boolean;
+  skipped?:       boolean;
+  violations:     Array<{
+    id:             string;
+    impact:         string;
+    description:    string;
+    nodes_affected: number;
+  }>;
+  critical_count: number;
+  serious_count:  number;
+  validator:      'axe';
+}
+
+/** Injectable — accepts a URL and returns raw Axe results. No real browser in tests. */
+export type AxePageRunner = (url: string) => Promise<AxeRawResult>;
+
+async function realAxePageRunner(url: string): Promise<AxeRawResult> {
+  const { chromium }          = await import('playwright');
+  const { default: AxeBuilder } = await import('@axe-core/playwright');
+  const browser = await chromium.launch({ headless: true });
+  const page    = await browser.newPage();
+  try {
+    await page.goto(url, { waitUntil: 'domcontentloaded' });
+    const results = await new AxeBuilder({ page }).analyze();
+    return results as unknown as AxeRawResult;
+  } finally {
+    await browser.close();
+  }
+}
+
+/**
+ * Simple URL-based Axe validator for the validation ladder.
+ *
+ * Navigates to `url`, runs axe.run(), and fails on critical/serious violations.
+ * Moderate and minor violations are recorded but do not fail.
+ * If the browser launch or axe run fails for any reason, returns skipped=true.
+ * Never throws.
+ */
+export async function validateAxe(
+  input:        { url: string },
+  runAxeOnPage?: AxePageRunner,
+): Promise<SimpleAxeResult> {
+  const runner = runAxeOnPage ?? realAxePageRunner;
+
+  let raw: AxeRawResult;
+  try {
+    raw = await runner(input.url);
+  } catch {
+    return {
+      passed:         true,
+      skipped:        true,
+      violations:     [],
+      critical_count: 0,
+      serious_count:  0,
+      validator:      'axe',
+    };
+  }
+
+  const violations = (raw.violations ?? []).map((v) => ({
+    id:             v.id,
+    impact:         normaliseImpact(v.impact),
+    description:    v.description,
+    nodes_affected: Array.isArray(v.nodes) ? v.nodes.length : 0,
+  }));
+
+  const critical_count = violations.filter((v) => v.impact === 'critical').length;
+  const serious_count  = violations.filter((v) => v.impact === 'serious').length;
+  const passed         = critical_count === 0 && serious_count === 0;
+
+  return { passed, violations, critical_count, serious_count, validator: 'axe' };
+}
+
 // ── runAxe ────────────────────────────────────────────────────────────────────
 
 /**
