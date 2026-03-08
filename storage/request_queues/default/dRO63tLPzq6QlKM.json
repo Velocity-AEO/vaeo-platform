@@ -1,9 +1,0 @@
-{
-	"id": "dRO63tLPzq6QlKM",
-	"json": "{\"id\":\"dRO63tLPzq6QlKM\",\"url\":\"https://cococabanalife.com/collections/all\",\"loadedUrl\":\"https://cococabanalife.com/collections/all\",\"uniqueKey\":\"https://cococabanalife.com/collections/all\",\"method\":\"GET\",\"noRetry\":false,\"retryCount\":0,\"errorMessages\":[],\"headers\":{},\"userData\":{\"__crawlee\":{\"crawlDepth\":1,\"enqueueStrategy\":\"same-origin\",\"state\":4}},\"handledAt\":\"2026-03-07T19:30:22.718Z\"}",
-	"method": "GET",
-	"orderNo": null,
-	"retryCount": 0,
-	"uniqueKey": "https://cococabanalife.com/collections/all",
-	"url": "https://cococabanalife.com/collections/all"
-}

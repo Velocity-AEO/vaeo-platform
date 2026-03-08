@@ -1,9 +1,0 @@
-{
-	"id": "7ZUkULfBpdnWIGI",
-	"json": "{\"id\":\"7ZUkULfBpdnWIGI\",\"url\":\"https://cococabanalife.com/cart\",\"loadedUrl\":\"https://cococabanalife.com/cart\",\"uniqueKey\":\"https://cococabanalife.com/cart\",\"method\":\"GET\",\"noRetry\":false,\"retryCount\":0,\"errorMessages\":[],\"headers\":{},\"userData\":{\"__crawlee\":{\"crawlDepth\":1,\"enqueueStrategy\":\"same-origin\",\"state\":4}},\"handledAt\":\"2026-03-07T19:30:22.345Z\"}",
-	"method": "GET",
-	"orderNo": null,
-	"retryCount": 0,
-	"uniqueKey": "https://cococabanalife.com/cart",
-	"url": "https://cococabanalife.com/cart"
-}

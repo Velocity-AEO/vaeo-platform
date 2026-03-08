@@ -25,5 +25,12 @@ coverage/
 # Outputs (optional - you may choose to track later)
 outputs/
 
+# Crawlee runtime state
+storage/
+**/storage/
+
+# Supabase CLI temp
+supabase/.temp/
+
 # OS
 .DS_Store
