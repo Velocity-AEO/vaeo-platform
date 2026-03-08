@@ -14,6 +14,7 @@
  *   meta_title        → global.title_tag metafield on page/product/article/collection
  *   meta_description  → global.description_tag metafield
  *   image_alt         → PUT /products/{id}/images/{id}.json  (requires product_id + image_id in after_value)
+ *   image_dimensions  → PUT /products/{id}/images/{id}.json  (requires product_id + image_id + width + height in after_value)
  *
  * Stub fix types (log + return success=true):
  *   h1, schema, redirect
@@ -36,7 +37,7 @@ export interface ShopifyFixRequest {
   action_id:    string;
   access_token: string;
   store_url:    string;
-  fix_type:     'meta_title' | 'meta_description' | 'h1' | 'image_alt' | 'schema' | 'redirect';
+  fix_type:     'meta_title' | 'meta_description' | 'h1' | 'image_alt' | 'image_dimensions' | 'schema' | 'redirect';
   target_url:   string;
   before_value: Record<string, unknown>;
   after_value:  Record<string, unknown>;
@@ -306,6 +307,79 @@ async function applyMetaFix(
   };
 }
 
+// ── Image dimension fetch ─────────────────────────────────────────────────────
+
+/**
+ * Fetches intrinsic image dimensions from Shopify Admin API metadata.
+ * Calls GET /products/{product_id}/images/{image_id}.json.
+ * Returns { width, height } from Shopify's stored metadata.
+ * Never downloads the image file itself.
+ */
+async function fetchImageDimensions(
+  host:      string,
+  headers:   Record<string, string>,
+  productId: string,
+  imageId:   string,
+): Promise<{ width: number; height: number } | null> {
+  const url = `https://${host}/admin/api/2024-01/products/${productId}/images/${imageId}.json`;
+  console.log(`[shopify] GET ${url} (dimensions)`);
+  const res = await shopifyFetch(url, { method: 'GET', headers });
+  if (!res.ok) return null;
+  const data = await res.json() as { image?: { width?: number; height?: number } };
+  const w = data.image?.width;
+  const h = data.image?.height;
+  if (!w || !h) return null;
+  return { width: w, height: h };
+}
+
+// ── Image dimensions fix ──────────────────────────────────────────────────────
+
+/**
+ * Injects width + height onto a Shopify product image via the Admin API.
+ * after_value fields: product_id, image_id, width, height.
+ * Captures before-state (old width/height) for rollback.
+ */
+async function applyImageDimensionsFix(
+  request: ShopifyFixRequest,
+  host:    string,
+  headers: Record<string, string>,
+): Promise<Record<string, unknown>> {
+  const productId = String(request.after_value['product_id'] ?? request.after_value['shopify_product_id'] ?? '');
+  const imageId   = String(request.after_value['image_id']   ?? request.after_value['shopify_image_id']   ?? '');
+  const width     = Number(request.after_value['width']);
+  const height    = Number(request.after_value['height']);
+
+  if (!productId || !imageId) {
+    throw new Error('image_dimensions fix requires after_value.product_id and after_value.image_id');
+  }
+  if (!width || !height) {
+    throw new Error('image_dimensions fix requires after_value.width and after_value.height');
+  }
+
+  // Capture before-state for rollback
+  const before = await fetchImageDimensions(host, headers, productId, imageId);
+
+  // PUT updated dimensions
+  const putUrl = `https://${host}/admin/api/2024-01/products/${productId}/images/${imageId}.json`;
+  console.log(`[shopify] PUT ${putUrl} → width=${width}, height=${height}`);
+  const putRes = await shopifyFetch(putUrl, {
+    method:  'PUT',
+    headers,
+    body:    JSON.stringify({ image: { id: parseInt(imageId, 10), width, height } }),
+  });
+  if (!putRes.ok) {
+    const text = await putRes.text();
+    throw new Error(`image_dimensions PUT failed (${putRes.status}): ${text}`);
+  }
+
+  return {
+    product_id: productId,
+    image_id:   imageId,
+    old_width:  before?.width  ?? null,
+    old_height: before?.height ?? null,
+  };
+}
+
 // ── Image alt fix ─────────────────────────────────────────────────────────────
 
 async function applyImageAltFix(
@@ -432,6 +506,8 @@ export async function applyFix(request: ShopifyFixRequest): Promise<ShopifyFixRe
       beforeValue = await applyMetaFix(request, host, headers);
     } else if (request.fix_type === 'image_alt') {
       beforeValue = await applyImageAltFix(request, host, headers);
+    } else if (request.fix_type === 'image_dimensions') {
+      beforeValue = await applyImageDimensionsFix(request, host, headers);
     } else {
       process.stderr.write(
         `[shopify-adapter] fix:stub — fix_type=${request.fix_type} not yet wired, returning success=true\n`,
@@ -525,6 +601,30 @@ export async function revertFix(request: ShopifyRevertRequest): Promise<ShopifyR
         body:    JSON.stringify({ image: { id: imageId, alt: oldAlt } }),
       });
       if (!res.ok) throw new Error(`image revert PUT failed (${res.status})`);
+    } else if (request.fix_type === 'image_dimensions') {
+      const productId = bv['product_id'];
+      const imageId   = bv['image_id'];
+      const oldWidth  = bv['old_width']  as number | null;
+      const oldHeight = bv['old_height'] as number | null;
+
+      if (!productId || !imageId) {
+        throw new Error('revertFix: before_value.product_id and before_value.image_id required');
+      }
+      if (!oldWidth || !oldHeight) {
+        // No prior dimensions to restore — nothing to revert
+        process.stderr.write(
+          `[shopify-adapter] revert:skip — image_dimensions had no prior width/height (action_id=${request.action_id})\n`,
+        );
+      } else {
+        const url = `https://${host}/admin/api/2024-01/products/${productId}/images/${imageId}.json`;
+        console.log(`[shopify] PUT ${url} → restoring width=${oldWidth}, height=${oldHeight}`);
+        const res = await shopifyFetch(url, {
+          method:  'PUT',
+          headers,
+          body:    JSON.stringify({ image: { id: imageId, width: oldWidth, height: oldHeight } }),
+        });
+        if (!res.ok) throw new Error(`image_dimensions revert PUT failed (${res.status})`);
+      }
     } else {
       process.stderr.write(
         `[shopify-adapter] revert:stub — fix_type=${request.fix_type} not yet wired, returning success=true\n`,

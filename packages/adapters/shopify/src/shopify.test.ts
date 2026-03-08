@@ -334,6 +334,174 @@ describe('applyFix — image_alt', () => {
   });
 });
 
+// ── applyFix — image_dimensions ───────────────────────────────────────────────
+
+describe('applyFix — image_dimensions', () => {
+  afterEach(() => _resetInjections());
+
+  it('GETs existing dimensions then PUTs new ones, captures before_value', async () => {
+    const calls: { url: string; method: string }[] = [];
+    _injectFetch(recordingFetch([
+      { status: 200, body: { image: { id: 99, width: 400, height: 300 } } },  // GET current dims
+      { status: 200, body: { image: { id: 99, width: 1280, height: 960 } } }, // PUT new dims
+    ], calls));
+
+    const result = await applyFix({
+      ...BASE_META_FIX,
+      fix_type:    'image_dimensions',
+      after_value: { product_id: '42', image_id: '99', width: 1280, height: 960 },
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].method, 'GET');
+    assert.ok(calls[0].url.includes('/products/42/images/99.json'));
+    assert.equal(calls[1].method, 'PUT');
+    assert.ok(result.before_value?.['old_width'] === 400);
+    assert.ok(result.before_value?.['old_height'] === 300);
+  });
+
+  it('captures null before_value when image has no prior dimensions', async () => {
+    _injectFetch(seqFetch([
+      { status: 200, body: { image: { id: 99 } } },                           // no width/height
+      { status: 200, body: { image: { id: 99, width: 800, height: 600 } } },  // PUT succeeds
+    ]));
+
+    const result = await applyFix({
+      ...BASE_META_FIX,
+      fix_type:    'image_dimensions',
+      after_value: { product_id: '42', image_id: '99', width: 800, height: 600 },
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(result.before_value?.['old_width'],  null);
+    assert.equal(result.before_value?.['old_height'], null);
+  });
+
+  it('returns success=false when product_id is missing', async () => {
+    const result = await applyFix({
+      ...BASE_META_FIX,
+      fix_type:    'image_dimensions',
+      after_value: { image_id: '99', width: 800, height: 600 },
+    });
+    assert.equal(result.success, false);
+    assert.ok(result.error?.includes('product_id'));
+  });
+
+  it('returns success=false when width is missing', async () => {
+    const result = await applyFix({
+      ...BASE_META_FIX,
+      fix_type:    'image_dimensions',
+      after_value: { product_id: '42', image_id: '99', height: 600 },
+    });
+    assert.equal(result.success, false);
+    assert.ok(result.error?.includes('width'));
+  });
+
+  it('returns success=false when PUT fails', async () => {
+    _injectFetch(seqFetch([
+      { status: 200, body: { image: { id: 99, width: 400, height: 300 } } },
+      { status: 422, body: { errors: 'Unprocessable Entity' } },
+    ]));
+
+    const result = await applyFix({
+      ...BASE_META_FIX,
+      fix_type:    'image_dimensions',
+      after_value: { product_id: '42', image_id: '99', width: 800, height: 600 },
+    });
+    assert.equal(result.success, false);
+    assert.ok(result.error?.includes('422'));
+  });
+
+  it('never throws under any condition', async () => {
+    _injectFetch(throwingFetch('network error'));
+    let threw = false;
+    try {
+      await applyFix({
+        ...BASE_META_FIX,
+        fix_type:    'image_dimensions',
+        after_value: { product_id: '42', image_id: '99', width: 800, height: 600 },
+      });
+    } catch { threw = true; }
+    assert.equal(threw, false);
+  });
+});
+
+// ── revertFix — image_dimensions ──────────────────────────────────────────────
+
+describe('revertFix — image_dimensions', () => {
+  afterEach(() => _resetInjections());
+
+  it('PUTs old width/height when before_value has them', async () => {
+    const calls: { url: string; method: string }[] = [];
+    _injectFetch(recordingFetch([
+      { status: 200, body: { image: { id: 99, width: 400, height: 300 } } },
+    ], calls));
+
+    const result = await revertFix({
+      ...BASE_REVERT,
+      fix_type:     'image_dimensions',
+      before_value: { product_id: '42', image_id: '99', old_width: 400, old_height: 300 },
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].method, 'PUT');
+    assert.ok(calls[0].url.includes('/products/42/images/99.json'));
+  });
+
+  it('skips gracefully when old_width/old_height are null', async () => {
+    const calls: { url: string; method: string }[] = [];
+    _injectFetch(recordingFetch([], calls));
+
+    const result = await revertFix({
+      ...BASE_REVERT,
+      fix_type:     'image_dimensions',
+      before_value: { product_id: '42', image_id: '99', old_width: null, old_height: null },
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(calls.length, 0, 'no API calls when no prior dimensions');
+  });
+
+  it('returns success=false when product_id missing', async () => {
+    const result = await revertFix({
+      ...BASE_REVERT,
+      fix_type:     'image_dimensions',
+      before_value: { image_id: '99', old_width: 400, old_height: 300 },
+    });
+    assert.equal(result.success, false);
+    assert.ok(result.error?.includes('product_id'));
+  });
+
+  it('returns success=false when PUT fails', async () => {
+    _injectFetch(seqFetch([
+      { status: 422, body: { errors: 'bad' } },
+    ]));
+
+    const result = await revertFix({
+      ...BASE_REVERT,
+      fix_type:     'image_dimensions',
+      before_value: { product_id: '42', image_id: '99', old_width: 400, old_height: 300 },
+    });
+    assert.equal(result.success, false);
+    assert.ok(result.error?.includes('422'));
+  });
+
+  it('never throws under any condition', async () => {
+    _injectFetch(throwingFetch('ECONNRESET'));
+    let threw = false;
+    try {
+      await revertFix({
+        ...BASE_REVERT,
+        fix_type:     'image_dimensions',
+        before_value: { product_id: '42', image_id: '99', old_width: 400, old_height: 300 },
+      });
+    } catch { threw = true; }
+    assert.equal(threw, false);
+  });
+});
+
 // ── applyFix — stub fix types ─────────────────────────────────────────────────
 
 describe('applyFix — stub fix types (h1, schema, redirect)', () => {
