@@ -14,6 +14,7 @@ import {
   type RollbackCommandOps,
   type RollbackableItem,
   type RollbackManifest,
+  type AffectedResource,
 } from './rollback.js';
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -573,5 +574,161 @@ describe('runRollback — status field derivation', () => {
       executeRollback: async () => { throw new Error('cms down'); },
     }));
     assert.equal(result.status, 'failed');
+  });
+});
+
+// ── CMS dispatch: Shopify metafield / WordPress page_meta ─────────────────────
+
+function shopifyMetafieldManifest(item: RollbackableItem): RollbackManifest {
+  return {
+    manifest_id:       `manifest-${item.id}`,
+    run_id:            item.run_id,
+    tenant_id:         item.tenant_id,
+    cms_type:          'shopify',
+    fields_to_reverse: 1,
+    affected_resources: [{
+      resource_type: 'metafield' as AffectedResource['resource_type'],
+      resource_id:   'mf-123',
+      resource_key:  'title_tag',
+      before_value:  'Old Title',
+    }],
+  };
+}
+
+function wpPageMetaManifest(item: RollbackableItem): RollbackManifest {
+  return {
+    manifest_id:       `manifest-${item.id}`,
+    run_id:            item.run_id,
+    tenant_id:         item.tenant_id,
+    cms_type:          'wordpress',
+    fields_to_reverse: 1,
+    affected_resources: [{
+      resource_type: 'page_meta' as AffectedResource['resource_type'],
+      resource_id:   'post-456',
+      resource_key:  'meta_description',
+      before_value:  'Old description',
+    }],
+  };
+}
+
+describe('runRollback — Shopify metafield: 2 items reversed, both marked rolled_back', () => {
+  it('2 Shopify metafield items → rolled_back=2, status=completed', async () => {
+    const markedIds: string[] = [];
+    const capturedManifests: RollbackManifest[] = [];
+    const items = [
+      makeItem({ cms_type: 'shopify' }),
+      makeItem({ cms_type: 'shopify' }),
+    ];
+
+    const result = await runRollback(baseReq(), happy({
+      loadDeployed: async () => items,
+      loadManifest: async (item) => shopifyMetafieldManifest(item),
+      executeRollback: async (item, manifest) => {
+        capturedManifests.push(manifest);
+        return { fields_reversed: manifest.affected_resources?.length ?? 1 };
+      },
+      markRolledBack: async (id) => { markedIds.push(id); },
+    }));
+
+    assert.equal(result.rolled_back, 2);
+    assert.equal(result.failed,      0);
+    assert.equal(result.status,      'completed');
+    assert.equal(markedIds.length,   2);
+    assert.deepEqual(new Set(markedIds), new Set(items.map((i) => i.id)));
+    assert.equal(capturedManifests[0]?.affected_resources?.[0]?.resource_type, 'metafield');
+    assert.equal(capturedManifests[0]?.affected_resources?.[0]?.before_value,  'Old Title');
+  });
+
+  it('metafield manifest fields passed correctly to executeRollback', async () => {
+    const item = makeItem({ cms_type: 'shopify' });
+    let capturedManifest: RollbackManifest | null = null;
+    await runRollback(baseReq(), happy({
+      loadDeployed:    async () => [item],
+      loadManifest:    async () => shopifyMetafieldManifest(item),
+      executeRollback: async (_, manifest) => { capturedManifest = manifest; return { fields_reversed: 1 }; },
+    }));
+    assert.ok(capturedManifest !== null);
+    assert.equal(capturedManifest!.cms_type,                                    'shopify');
+    assert.equal(capturedManifest!.affected_resources?.[0]?.resource_key,       'title_tag');
+    assert.equal(capturedManifest!.affected_resources?.[0]?.resource_id,        'mf-123');
+  });
+});
+
+describe('runRollback — WordPress page_meta: item reversed correctly', () => {
+  it('1 WordPress page_meta item → reversed, rolled_back=1', async () => {
+    const item = makeItem({ cms_type: 'wordpress' });
+    let capturedManifest: RollbackManifest | null = null;
+
+    const result = await runRollback(baseReq({ cms: 'wordpress' }), happy({
+      loadDeployed:    async () => [item],
+      loadManifest:    async () => wpPageMetaManifest(item),
+      executeRollback: async (_, manifest) => {
+        capturedManifest = manifest;
+        return { fields_reversed: manifest.affected_resources?.length ?? 1 };
+      },
+    }));
+
+    assert.equal(result.rolled_back, 1);
+    assert.equal(result.status,      'completed');
+    assert.ok(capturedManifest !== null);
+    assert.equal(capturedManifest!.cms_type,                              'wordpress');
+    assert.equal(capturedManifest!.affected_resources?.[0]?.resource_type, 'page_meta');
+    assert.equal(capturedManifest!.affected_resources?.[0]?.before_value,  'Old description');
+  });
+});
+
+describe('runRollback — failed_items populated on CMS API failure', () => {
+  it('one CMS call fails → failed_items contains error, other item reversed', async () => {
+    const itemA = makeItem({ id: 'item-fail' });
+    const itemB = makeItem({ id: 'item-ok'   });
+    let execCount = 0;
+
+    const result = await runRollback(baseReq(), happy({
+      loadDeployed: async () => [itemA, itemB],
+      loadManifest: async (item) => shopifyMetafieldManifest(item),
+      executeRollback: async (item) => {
+        execCount++;
+        if (execCount === 1) throw new Error('CMS API timeout');
+        return { fields_reversed: 1 };
+      },
+    }));
+
+    assert.equal(result.rolled_back,          1);
+    assert.equal(result.failed,               1);
+    assert.equal(result.failed_items.length,  1);
+    assert.equal(result.failed_items[0]!.action_id, itemA.id);
+    assert.ok(result.failed_items[0]!.error.includes('CMS API timeout'));
+    assert.equal(result.status, 'partial');
+  });
+
+  it('failed_items is empty when all items succeed', async () => {
+    const result = await runRollback(baseReq(), happy({
+      loadDeployed: async () => [makeItem(), makeItem()],
+      loadManifest: async (item) => shopifyMetafieldManifest(item),
+    }));
+    assert.deepEqual(result.failed_items, []);
+  });
+
+  it('failed_items includes url for easier debugging', async () => {
+    const item = makeItem({ url: 'https://example.com/products/thing' });
+    const result = await runRollback(baseReq(), happy({
+      loadDeployed:    async () => [item],
+      loadManifest:    async (i) => shopifyMetafieldManifest(i),
+      executeRollback: async () => { throw new Error('timeout'); },
+    }));
+    assert.equal(result.failed_items[0]!.url, 'https://example.com/products/thing');
+  });
+});
+
+describe('runRollback — no deployed items returns total:0, reversed:0', () => {
+  it('no deployed items → total items=0, rolled_back=0, status=completed', async () => {
+    const result = await runRollback(baseReq(), happy({
+      loadDeployed: async () => [],
+    }));
+    assert.equal(result.rolled_back,         0);
+    assert.equal(result.failed,              0);
+    assert.equal(result.skipped,             0);
+    assert.equal(result.failed_items.length, 0);
+    assert.equal(result.status,              'completed');
   });
 });

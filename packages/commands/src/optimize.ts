@@ -80,15 +80,20 @@ export interface OptimizeResult {
 
 export interface OptimizeCommandOps {
   /** Load action_queue rows with execution_status='queued', ordered by priority ASC then risk_score ASC. */
-  loadQueue:    (runId: string, tenantId: string) => Promise<ActionQueueItem[]>;
+  loadQueue:             (runId: string, tenantId: string) => Promise<ActionQueueItem[]>;
   /** Apply the proposed fix in sandbox via the patch engine. */
-  applyFix:     (item: ActionQueueItem) => Promise<void>;
+  applyFix:              (item: ActionQueueItem) => Promise<void>;
   /** Run the full validator ladder (lighthouse → w3c → schema → axe → visual-diff). */
-  runValidators:(item: ActionQueueItem) => Promise<ValidatorSuiteResult>;
+  runValidators:         (item: ActionQueueItem) => Promise<ValidatorSuiteResult>;
   /** Promote the sandbox fix to live. */
-  deployFix:    (item: ActionQueueItem) => Promise<void>;
+  deployFix:             (item: ActionQueueItem) => Promise<void>;
   /** Update execution_status in action_queue. */
-  markStatus:   (itemId: string, tenantId: string, status: string) => Promise<void>;
+  markStatus:            (itemId: string, tenantId: string, status: string) => Promise<void>;
+  /**
+   * Write rollback_manifest JSONB to action_queue after applyFix succeeds.
+   * Non-blocking — never throws. Optional (skipped in tests that don't inject it).
+   */
+  writeRollbackManifest?: (item: ActionQueueItem) => Promise<void>;
 }
 
 // ── Default (real) ops ────────────────────────────────────────────────────────
@@ -351,6 +356,65 @@ export async function dispatchAdapterFix(
   }
 }
 
+// ── Rollback manifest builder ─────────────────────────────────────────────────
+
+type ResourceType = 'metafield' | 'theme_asset' | 'redirect' | 'post_meta' | 'page_meta';
+
+function deriveResourceType(issueType: string, cmsType: 'shopify' | 'wordpress'): ResourceType {
+  if (issueType.startsWith('META_TITLE') || issueType.startsWith('META_DESC') || issueType.startsWith('IMG_')) {
+    return cmsType === 'wordpress' ? 'post_meta' : 'metafield';
+  }
+  if (issueType.startsWith('H1_') || issueType.startsWith('SCHEMA_')) {
+    return cmsType === 'wordpress' ? 'post_meta' : 'theme_asset';
+  }
+  if (issueType.includes('REDIRECT') || issueType.startsWith('ERR_')) {
+    return 'redirect';
+  }
+  return cmsType === 'wordpress' ? 'post_meta' : 'metafield';
+}
+
+/**
+ * Builds the rollback_manifest JSONB written to action_queue after a successful applyFix.
+ * Pure function — no I/O, easily testable.
+ */
+export function buildRollbackManifest(item: ActionQueueItem): Record<string, unknown> {
+  const cmsType      = ((item.cms_type ?? 'shopify') as 'shopify' | 'wordpress');
+  const resourceType = deriveResourceType(item.issue_type, cmsType);
+  const fix          = item.proposed_fix;
+  return {
+    run_id:   item.run_id,
+    cms_type: cmsType,
+    affected_resources: [{
+      resource_type: resourceType,
+      resource_id:   fix['resource_id']   as string | undefined,
+      resource_key:  fix['resource_key']  as string | undefined,
+      before_value:  (fix['before_value'] as Record<string, unknown> | undefined)?.['current_value']
+                     ?? fix['current_value'],
+    }],
+    created_at: new Date().toISOString(),
+  };
+}
+
+const realWriteRollbackManifest: NonNullable<OptimizeCommandOps['writeRollbackManifest']> = async (item) => {
+  try {
+    const { createClient } = await import('@supabase/supabase-js');
+    const { getConfig }    = await import('../../core/config.js');
+    const cfg = getConfig();
+    const db  = createClient(cfg.supabaseUrl, cfg.supabaseServiceKey);
+    const manifest = buildRollbackManifest(item);
+    const { error } = await db
+      .from('action_queue')
+      .update({ rollback_manifest: manifest, updated_at: new Date().toISOString() })
+      .eq('id', item.id)
+      .eq('tenant_id', item.tenant_id);
+    if (error) {
+      process.stderr.write(`[optimize] writeRollbackManifest failed for ${item.id}: ${error.message}\n`);
+    }
+  } catch (err) {
+    process.stderr.write(`[optimize] writeRollbackManifest threw for ${item.id}: ${String(err)}\n`);
+  }
+};
+
 /**
  * Applies a fix in sandbox mode:
  *   1. applyPatch() — stores rollback manifest, calls patch-engine adapter stub
@@ -469,6 +533,8 @@ export async function runOptimize(
     runValidators: realRunValidators,
     deployFix:     realDeployFix,
     markStatus:    realMarkStatus,
+    // writeRollbackManifest: only wired in production; tests inject via _testOps
+    ...(_testOps === undefined ? { writeRollbackManifest: realWriteRollbackManifest } : {}),
     ..._testOps,
   };
 
@@ -584,6 +650,11 @@ export async function runOptimize(
       try { await ops.markStatus(item.id, item.tenant_id, 'failed'); } catch { /* non-blocking */ }
       fixesFailed++;
       continue;
+    }
+
+    // Write rollback_manifest after successful apply (non-blocking)
+    if (ops.writeRollbackManifest) {
+      ops.writeRollbackManifest(item).catch(() => { /* non-blocking */ });
     }
 
     // Step d: Route to approval if risk > threshold OR approval explicitly required

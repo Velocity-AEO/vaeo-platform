@@ -40,15 +40,27 @@ export interface RollbackableItem {
   issue_type:       string;
   url:              string;
   execution_status: string;
+  cms_type?:        string;
 }
 
-// ── Manifest shape (minimal — real impl reads from rollback_manifests table) ──
+// ── Manifest shape ────────────────────────────────────────────────────────────
+
+export interface AffectedResource {
+  resource_type: 'metafield' | 'theme_asset' | 'redirect' | 'post_meta' | 'page_meta';
+  resource_id?:  string;
+  resource_key?: string;
+  before_value?: unknown;
+}
 
 export interface RollbackManifest {
-  manifest_id:     string;
-  run_id:          string;
-  tenant_id:       string;
-  fields_to_reverse: number;
+  manifest_id:        string;
+  run_id:             string;
+  tenant_id:          string;
+  cms_type?:          string;
+  fields_to_reverse:  number;
+  /** Ordered list of CMS fields to reverse. Empty = legacy path (no-op). */
+  affected_resources?: AffectedResource[];
+  created_at?:        string;
 }
 
 // ── Rollback runner result (mirrors ExecuteRollbackResult) ───────────────────
@@ -78,6 +90,8 @@ export interface RollbackResult {
   failed:       number;
   /** Items with no manifest, already rolled back, or non-reversible status. */
   skipped:      number;
+  /** Details for every item where CMS API reversal failed. */
+  failed_items: Array<{ action_id: string; url: string; error: string }>;
   completed_at: string;
   status:       'completed' | 'partial' | 'failed';
   error?:       string;
@@ -168,27 +182,115 @@ const realLoadManifest: RollbackCommandOps['loadManifest'] = async (item) => {
   const row = data as { id: string; run_id: string; tenant_id: string; rollback_manifest: unknown };
   if (!row.rollback_manifest) return null;
   const m = row.rollback_manifest as Record<string, unknown>;
+  const resources = (m['affected_resources'] as unknown[] | undefined) ?? [];
   return {
-    manifest_id:      String(m['action_id'] ?? row.id),
-    run_id:           String(m['run_id']    ?? row.run_id),
-    tenant_id:        row.tenant_id,
-    fields_to_reverse: 1,
+    manifest_id:       String(m['action_id'] ?? row.id),
+    run_id:            String(m['run_id']    ?? row.run_id),
+    tenant_id:         row.tenant_id,
+    cms_type:          m['cms_type'] ? String(m['cms_type']) : undefined,
+    fields_to_reverse: resources.length || 1,
+    affected_resources: resources as AffectedResource[],
+    created_at:        m['created_at'] ? String(m['created_at']) : undefined,
   };
 };
 
-const realExecuteRollback: RollbackCommandOps['executeRollback'] = async (item, _manifest) => {
-  // Call Shopify adapter revertFix directly — rollback-runner queries the
-  // non-existent rollback_manifests table; action_queue.rollback_manifest is used instead.
-  const { revertFix } = await import('../../adapters/shopify/src/index.js');
-  const result = await revertFix({
-    action_id:    item.id,
-    access_token: process.env['SHOPIFY_POC_ACCESS_TOKEN'] ?? '',
-    store_url:    process.env['SHOPIFY_POC_STORE_URL']    ?? '',
-    fix_type:     item.issue_type,
-    before_value: {},
-  });
-  if (!result.success) throw new Error(result.error ?? 'shopify revertFix failed');
-  return { fields_reversed: 1 };
+/**
+ * Dispatches one resource revert to the correct CMS API endpoint.
+ *
+ * Shopify:
+ *   metafield   → PATCH /admin/api/2024-01/metafields/{id}.json
+ *   theme_asset → PUT  /admin/api/2024-01/themes/{theme_id}/assets.json
+ *   redirect    → DELETE /admin/api/2024-01/redirects/{id}.json
+ *
+ * WordPress:
+ *   post_meta / page_meta → PATCH /wp-json/wp/v2/{posts|pages}/{id}
+ */
+async function realDispatchRevert(
+  resource: AffectedResource,
+  item:     RollbackableItem,
+  cmsType:  string,
+): Promise<void> {
+  const rt = resource.resource_type;
+
+  if (cmsType === 'wordpress' || rt === 'post_meta' || rt === 'page_meta') {
+    const endpoint = rt === 'page_meta' ? 'pages' : 'posts';
+    const wpUrl    = process.env['WP_POC_URL']          ?? '';
+    const username = process.env['WP_POC_USERNAME']     ?? '';
+    const password = process.env['WP_POC_APP_PASSWORD'] ?? '';
+    const authB64  = Buffer.from(`${username}:${password}`).toString('base64');
+    const resp = await fetch(
+      `${wpUrl}/wp-json/wp/v2/${endpoint}/${resource.resource_id}`,
+      {
+        method:  'PATCH',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Basic ${authB64}` },
+        body:    JSON.stringify({ meta: { [resource.resource_key ?? '']: resource.before_value } }),
+      },
+    );
+    if (!resp.ok) throw new Error(`WP ${rt} revert failed: ${resp.status} ${resp.statusText}`);
+    return;
+  }
+
+  const storeUrl = (process.env['SHOPIFY_POC_STORE_URL'] ?? '').replace(/^https?:\/\//, '').replace(/\/$/, '');
+  const token    = process.env['SHOPIFY_POC_ACCESS_TOKEN'] ?? '';
+  const headers  = { 'X-Shopify-Access-Token': token, 'Content-Type': 'application/json' };
+
+  if (rt === 'metafield') {
+    const resp = await fetch(
+      `https://${storeUrl}/admin/api/2024-01/metafields/${resource.resource_id}.json`,
+      { method: 'PATCH', headers, body: JSON.stringify({ metafield: { id: resource.resource_id, value: resource.before_value } }) },
+    );
+    if (!resp.ok) throw new Error(`Shopify metafield revert failed: ${resp.status}`);
+    return;
+  }
+
+  if (rt === 'theme_asset') {
+    const themeId = process.env['SHOPIFY_MAIN_THEME_ID'] ?? '';
+    const resp = await fetch(
+      `https://${storeUrl}/admin/api/2024-01/themes/${themeId}/assets.json`,
+      { method: 'PUT', headers, body: JSON.stringify({ asset: { key: resource.resource_key, value: resource.before_value } }) },
+    );
+    if (!resp.ok) throw new Error(`Shopify theme_asset revert failed: ${resp.status}`);
+    return;
+  }
+
+  if (rt === 'redirect') {
+    const resp = await fetch(
+      `https://${storeUrl}/admin/api/2024-01/redirects/${resource.resource_id}.json`,
+      { method: 'DELETE', headers: { 'X-Shopify-Access-Token': token } },
+    );
+    // 404 = already deleted, treat as success
+    if (!resp.ok && resp.status !== 404) throw new Error(`Shopify redirect delete failed: ${resp.status}`);
+    return;
+  }
+
+  throw new Error(`Unknown resource_type: ${rt}`);
+}
+
+const realExecuteRollback: RollbackCommandOps['executeRollback'] = async (item, manifest) => {
+  const cmsType   = manifest.cms_type ?? item.cms_type ?? 'shopify';
+  const resources = manifest.affected_resources ?? [];
+
+  if (resources.length === 0) {
+    // Legacy path: no affected_resources in manifest — fall back to Shopify adapter stub
+    const { revertFix } = await import('../../adapters/shopify/src/index.js');
+    const result = await revertFix({
+      action_id:    item.id,
+      access_token: process.env['SHOPIFY_POC_ACCESS_TOKEN'] ?? '',
+      store_url:    process.env['SHOPIFY_POC_STORE_URL']    ?? '',
+      fix_type:     item.issue_type,
+      before_value: {},
+    });
+    if (!result.success) throw new Error(result.error ?? 'shopify revertFix failed');
+    return { fields_reversed: 1 };
+  }
+
+  let reversed = 0;
+  for (const resource of resources) {
+    await realDispatchRevert(resource, item, cmsType);
+    process.stderr.write(`[rollback] REVERSED ${item.url} — ${resource.resource_key ?? resource.resource_type}\n`);
+    reversed++;
+  }
+  return { fields_reversed: reversed };
 };
 
 const realMarkRolledBack: RollbackCommandOps['markRolledBack'] = async (itemId, tenantId) => {
@@ -301,6 +403,7 @@ export async function runRollback(
       rolled_back:  0,
       failed:       0,
       skipped:      0,
+      failed_items: [],
       completed_at,
       status:       'completed',
     };
@@ -311,6 +414,7 @@ export async function runRollback(
   let rolledBack = 0;
   let failed     = 0;
   let skipped    = 0;
+  const failedItems: RollbackResult['failed_items'] = [];
 
   for (const item of items) {
     // Skip items not in a rollback-eligible status
@@ -336,6 +440,7 @@ export async function runRollback(
         metadata: { item_id: item.id, url: item.url, reason: `loadManifest: ${msg}` },
       });
       try { await ops.markRollbackFailed(item.id, item.tenant_id); } catch { /* non-blocking */ }
+      failedItems.push({ action_id: item.id, url: item.url, error: `loadManifest: ${msg}` });
       failed++;
       continue;
     }
@@ -367,6 +472,7 @@ export async function runRollback(
         metadata: { item_id: item.id, url: item.url, reason: msg },
       });
       try { await ops.markRollbackFailed(item.id, item.tenant_id); } catch { /* non-blocking */ }
+      failedItems.push({ action_id: item.id, url: item.url, error: msg });
       failed++;
       continue;
     }
@@ -398,6 +504,7 @@ export async function runRollback(
     rolled_back:  rolledBack,
     failed,
     skipped,
+    failed_items: failedItems,
     completed_at,
     status:       overallStatus,
   };
@@ -413,6 +520,7 @@ function failedResult(req: RollbackRequest, error: string): RollbackResult {
     rolled_back:  0,
     failed:       0,
     skipped:      0,
+    failed_items: [],
     completed_at: new Date().toISOString(),
     status:       'failed',
     error,

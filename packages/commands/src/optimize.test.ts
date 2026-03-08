@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 
 import {
   runOptimize,
+  buildRollbackManifest,
   type OptimizeRequest,
   type OptimizeCommandOps,
   type ActionQueueItem,
@@ -569,5 +570,63 @@ describe('runOptimize — status field derivation', () => {
       applyFix: async () => { throw new Error('crash'); },
     }));
     assert.equal(result.status, 'failed');
+  });
+});
+
+// ── Rollback manifest written after applyFix succeeds ─────────────────────────
+
+describe('runOptimize — writeRollbackManifest called after applyFix succeeds', () => {
+  it('writeRollbackManifest called once when item deploys', async () => {
+    let writtenItem: ActionQueueItem | null = null;
+    await runOptimize(baseReq(), happy({
+      writeRollbackManifest: async (item) => { writtenItem = item; },
+    }));
+    assert.ok(writtenItem !== null, 'writeRollbackManifest should be called');
+    assert.equal((writtenItem as ActionQueueItem).id, makeItem().id);
+  });
+
+  it('writeRollbackManifest NOT called when applyFix fails', async () => {
+    let writeCalled = false;
+    await runOptimize(baseReq(), happy({
+      applyFix:              async () => { throw new Error('patch error'); },
+      writeRollbackManifest: async () => { writeCalled = true; },
+    }));
+    assert.equal(writeCalled, false);
+  });
+
+  it('writeRollbackManifest NOT called when validators fail', async () => {
+    let writeCalled = false;
+    await runOptimize(baseReq(), happy({
+      runValidators:         async () => FAIL_VALIDATORS,
+      writeRollbackManifest: async () => { writeCalled = true; },
+    }));
+    assert.equal(writeCalled, false);
+  });
+
+  it('buildRollbackManifest: META_TITLE_MISSING + shopify → metafield resource_type', () => {
+    const item = makeItem({ issue_type: 'META_TITLE_MISSING', cms_type: 'shopify',
+      proposed_fix: { resource_id: 'mf-1', resource_key: 'title_tag', current_value: 'Old Title' } });
+    const manifest = buildRollbackManifest(item);
+    const resources = manifest['affected_resources'] as Array<Record<string, unknown>>;
+    assert.equal(resources[0]!['resource_type'], 'metafield');
+    assert.equal(resources[0]!['resource_id'],   'mf-1');
+    assert.equal(resources[0]!['before_value'],  'Old Title');
+  });
+
+  it('buildRollbackManifest: META_DESC_MISSING + wordpress → post_meta resource_type', () => {
+    const item = makeItem({ issue_type: 'META_DESC_MISSING', cms_type: 'wordpress',
+      proposed_fix: { resource_id: 'post-99', resource_key: 'meta_desc' } });
+    const manifest = buildRollbackManifest(item);
+    const resources = manifest['affected_resources'] as Array<Record<string, unknown>>;
+    assert.equal(resources[0]!['resource_type'], 'post_meta');
+    assert.equal(manifest['cms_type'],            'wordpress');
+  });
+
+  it('buildRollbackManifest: ERR_REDIRECT_CHAIN → redirect resource_type', () => {
+    const item = makeItem({ issue_type: 'ERR_REDIRECT_CHAIN', cms_type: 'shopify',
+      proposed_fix: { resource_id: 'redir-5' } });
+    const manifest = buildRollbackManifest(item);
+    const resources = manifest['affected_resources'] as Array<Record<string, unknown>>;
+    assert.equal(resources[0]!['resource_type'], 'redirect');
   });
 });
