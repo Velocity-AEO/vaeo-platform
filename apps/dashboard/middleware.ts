@@ -22,7 +22,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 // ── Public path detection ─────────────────────────────────────────────────────
 
-const PUBLIC_PREFIXES = ['/login', '/api/auth/', '/favicon.ico'];
+const PUBLIC_PREFIXES = ['/login', '/api/auth/', '/api/verify/', '/verify/', '/favicon.ico'];
 
 /** Exported for unit testing the pure routing logic. */
 export function isPublicPath(pathname: string): boolean {
