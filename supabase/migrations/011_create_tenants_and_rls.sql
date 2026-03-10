@@ -21,9 +21,12 @@ CREATE INDEX IF NOT EXISTS tenants_owner_user_id_idx ON tenants (owner_user_id);
 -- ── FK: sites → tenants ────────────────────────────────────────────────────
 -- sites.tenant_id already exists (migration 001) but had no FK constraint.
 
+-- NOT VALID defers checking existing rows — seed.ts calls VALIDATE CONSTRAINT after
+-- inserting the dev tenant (id=00000000-0000-0000-0000-000000000001) so the live rows pass.
 ALTER TABLE sites
   ADD CONSTRAINT sites_tenant_id_fk
-  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE;
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+  NOT VALID;
 
 -- ── Row Level Security ─────────────────────────────────────────────────────
 
