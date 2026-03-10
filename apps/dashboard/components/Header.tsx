@@ -4,7 +4,8 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 
 const NAV = [
-  { href: '/',           label: 'Dashboard'      },
+  { href: '/dashboard',  label: 'My Dashboard'   },
+  { href: '/',           label: 'Operator'       },
   { href: '/fixes',      label: 'Fixes'          },
   { href: '/runs',       label: 'Runs'           },
   { href: '/sites',      label: 'Sites'          },
