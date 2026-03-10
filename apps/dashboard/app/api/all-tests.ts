@@ -8,3 +8,6 @@
 
 import './onboarding/shopify/handler.test.ts';
 import './sites/[siteId]/health/handler.test.ts';
+import './auth/login/handler.test.ts';
+import './auth/magic-link/handler.test.ts';
+import './tenants/me/handler.test.ts';
