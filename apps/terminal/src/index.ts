@@ -27,6 +27,7 @@ import { runOptimizeCli } from '../../../packages/commands/src/optimize.js';
 import { runVerifyCli }   from '../../../packages/commands/src/verify.js';
 import { runPromoteCli }   from '../../../packages/commands/src/promote.js';
 import { runRollbackCli } from '../../../packages/commands/src/rollback.js';
+import { runTracerScanCli } from '../../../packages/commands/src/tracer-scan.js';
 
 // Type imports are referenced here so the file is the declared consumer of the
 // platform contracts. Implementations will import from packages/core/types.ts
@@ -180,6 +181,20 @@ program
       console.error(`✗ Rollback failed: ${err instanceof Error ? err.message : String(err)}`);
       process.exitCode = 1;
     }
+  });
+
+// ── vaeo tracer scan ─────────────────────────────────────────────────────────
+
+const tracer = program
+  .command('tracer')
+  .description('Tracer module — field-level SEO scanning and drift detection');
+
+tracer
+  .command('scan')
+  .description('Scan a site and populate the tracer URL inventory and field snapshots')
+  .requiredOption('--site <domain>', 'Site domain (e.g. cococabanalife.com)')
+  .action(async (opts: { site: string }) => {
+    await runTracerScanCli(opts);
   });
 
 // ── vaeo log ─────────────────────────────────────────────────────────────────

@@ -22,69 +22,7 @@ import type { ScoredIssue } from '../../risk-scorer/src/index.js';
 import type { IssueCategory, ProposedAction } from '../../guardrail/src/index.js';
 import { PRIORITY_MAP } from '../../guardrail/src/index.js';
 import { createLogger } from '../../action-log/src/index.js';
-
-// ── Protected route filter ────────────────────────────────────────────────────
-
-/**
- * Shopify system paths where no writable CMS resource exists.
- * These are framework-managed routes (auth, cart, checkout) that operators
- * cannot meaningfully fix via the Shopify Admin API.
- */
-const SHOPIFY_SYSTEM_PATHS = [
-  '/account',
-  '/cart',
-  '/checkout',
-  '/search',
-  '/password',
-  '/challenge',
-  '/customize',
-  '/orders',
-  '/collections/vendors',
-  '/collections/types',
-  '/customer_authentication',
-  '/customer_authentication/redirect',
-];
-
-/**
- * WordPress system paths where no writable CMS resource exists.
- * These are framework-managed routes (admin UI, cron, XML-RPC, feeds)
- * that are never user-facing content pages.
- */
-const WORDPRESS_SYSTEM_PATHS = [
-  '/wp-admin',
-  '/wp-login.php',
-  '/wp-cron.php',
-  '/xmlrpc.php',
-  '/feed',
-];
-
-/**
- * Returns true for URLs where no writable CMS resource exists (system routes,
- * auth pages) OR where the page is intentionally excluded from indexing.
- * VAEO never attempts fixes on these.
- */
-function isProtectedRoute(url: string): boolean {
-  try {
-    const parsed = new URL(url);
-    const path   = parsed.pathname;
-
-    // Shopify system paths — prefix match (e.g. /account/addresses → blocked)
-    if (SHOPIFY_SYSTEM_PATHS.some((p) => path === p || path.startsWith(p + '/'))) return true;
-
-    // WordPress system paths — prefix match (e.g. /wp-admin/options.php → blocked)
-    if (WORDPRESS_SYSTEM_PATHS.some((p) => path === p || path.startsWith(p + '/'))) return true;
-
-    // WordPress: /wp-json base only — REST API root; subpaths are data endpoints, not pages
-    if (path === '/wp-json') return true;
-
-    // WordPress: feed query param variant (/?feed=rss, /?feed=rss2, etc.)
-    if (parsed.searchParams.has('feed')) return true;
-
-    return false;
-  } catch {
-    return false;
-  }
-}
+import { isProtectedRoute } from '../../core/src/protected-routes.js';
 
 // ── Category mapping ──────────────────────────────────────────────────────────
 
