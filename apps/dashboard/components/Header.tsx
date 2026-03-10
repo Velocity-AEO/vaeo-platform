@@ -7,6 +7,7 @@ const NAV = [
   { href: '/sites',      label: 'Sites'          },
   { href: '/queue',      label: 'Command Center' },
   { href: '/onboarding', label: 'Connect Site'   },
+  { href: '/billing',    label: 'Billing'        },
 ];
 
 export default function Header() {

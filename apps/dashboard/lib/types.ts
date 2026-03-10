@@ -70,6 +70,56 @@ export interface DashboardStats {
   active_regressions:     number;
 }
 
+// ── Billing types ──────────────────────────────────────────────────────────────
+
+export type PlanId = 'starter' | 'pro' | 'enterprise';
+export type BillingStatus = 'active' | 'inactive' | 'past_due' | 'canceled';
+
+export interface Tenant {
+  id:                      string;
+  name:                    string;
+  email:                   string;
+  plan:                    PlanId;
+  billing_status:          BillingStatus;
+  stripe_customer_id:      string | null;
+  stripe_subscription_id:  string | null;
+  site_limit:              number;
+  created_at:              string;
+  updated_at:              string;
+}
+
+export interface PlanDefinition {
+  id:         PlanId;
+  name:       string;
+  price:      number;  // monthly cents
+  site_limit: number;
+  features:   string[];
+}
+
+export const PLANS: Record<PlanId, PlanDefinition> = {
+  starter: {
+    id: 'starter',
+    name: 'Starter',
+    price: 29900,
+    site_limit: 1,
+    features: ['1 Shopify site', 'SEO audit & fixes', 'Health score tracking', 'Email support'],
+  },
+  pro: {
+    id: 'pro',
+    name: 'Pro',
+    price: 79900,
+    site_limit: 5,
+    features: ['Up to 5 sites', 'Priority fix queue', 'Case study reports', 'Slack notifications', 'Priority support'],
+  },
+  enterprise: {
+    id: 'enterprise',
+    name: 'Enterprise',
+    price: 249900,
+    site_limit: 999,
+    features: ['Unlimited sites', 'Dedicated account manager', 'Custom integrations', 'SLA guarantee', 'White-label reports'],
+  },
+};
+
 export interface SiteWithStats extends Site {
   last_run_at:  string | null;
   last_run_id:  string | null;
