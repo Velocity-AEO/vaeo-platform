@@ -28,6 +28,8 @@ import { runVerifyCli }   from '../../../packages/commands/src/verify.js';
 import { runPromoteCli }   from '../../../packages/commands/src/promote.js';
 import { runRollbackCli } from '../../../packages/commands/src/rollback.js';
 import { runTracerScanCli } from '../../../packages/commands/src/tracer-scan.js';
+import { runApproveCli }    from '../../../packages/commands/src/approve.js';
+import { runOnboardCli }   from '../../../packages/commands/src/onboard.js';
 
 // Type imports are referenced here so the file is the declared consumer of the
 // platform contracts. Implementations will import from packages/core/types.ts
@@ -195,6 +197,28 @@ tracer
   .requiredOption('--site <domain>', 'Site domain (e.g. cococabanalife.com)')
   .action(async (opts: { site: string }) => {
     await runTracerScanCli(opts);
+  });
+
+// ── vaeo approve ─────────────────────────────────────────────────────────────
+
+program
+  .command('approve')
+  .description('Review and approve/skip pending action_queue items with reasoning blocks')
+  .requiredOption('--site <domain>', 'Site domain (e.g. cococabanalife.com)')
+  .option('--all',                   'Bulk approve all pending items without prompting')
+  .action(async (opts: { site: string; all?: boolean }) => {
+    await runApproveCli(opts);
+  });
+
+// ── vaeo onboard ─────────────────────────────────────────────────────────
+
+program
+  .command('onboard')
+  .description('Case-study entry point: register a Shopify site, scan, classify issues, and score')
+  .requiredOption('--site <domain>', 'Shopify store domain (e.g. mystore.myshopify.com)')
+  .requiredOption('--token <token>', 'Shopify Admin API access token (shpat_...)')
+  .action(async (opts: { site: string; token: string }) => {
+    await runOnboardCli(opts);
   });
 
 // ── vaeo log ─────────────────────────────────────────────────────────────────
