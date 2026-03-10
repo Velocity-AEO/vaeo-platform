@@ -1,49 +1,66 @@
 import { NextResponse } from 'next/server';
-import { exec } from 'child_process';
-import { promisify } from 'util';
 
-const execAsync = promisify(exec);
-
-// Set APPLY_FIX_MOCK=true (or any truthy value) on Vercel / non-local envs
-// where the VAEO-shopify-safe CLI is not available.
 const IS_MOCK = process.env.APPLY_FIX_MOCK === 'true';
 
-// Absolute path to the shopify-safe repo on the operator machine.
-const VAEO_REPO = process.env.VAEO_REPO_PATH ?? '/Users/vincentgoodrich/VAEO-shopify-safe';
+const PROPOSED_TITLE = 'Luxury Foam Pool Floats & Beach Accessories | Cococabana Life';
 
-const COMMAND = [
-  `cd "${VAEO_REPO}"`,
-  'doppler run --project vaeo-platform --config dev_goodrichvincent-eng --',
-  'npm run vaeo -- theme apply-next',
-  '--site cococabanalife.com',
-  '--run bp_20260308042816',
-  'APPLY-LIVE',
-].join(' && ');
+async function shopifyFetch(path: string, options: RequestInit = {}) {
+  const domain = process.env.SHOPIFY_STORE_DOMAIN;
+  const token = process.env.SHOPIFY_ADMIN_TOKEN;
+  if (!domain || !token) throw new Error('SHOPIFY_STORE_DOMAIN and SHOPIFY_ADMIN_TOKEN must be set');
+  const url = `https://${domain}/admin/api/2025-01/${path}`;
+  const res = await fetch(url, {
+    ...options,
+    headers: {
+      'X-Shopify-Access-Token': token,
+      'Content-Type': 'application/json',
+      ...options.headers,
+    },
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Shopify API ${res.status}: ${body.slice(0, 300)}`);
+  }
+  return res.json();
+}
+
+async function applyTitleFix(): Promise<void> {
+  // 1. Find the active (main) theme
+  const { themes } = await shopifyFetch('themes.json?role=main');
+  if (!themes || themes.length === 0) throw new Error('No main theme found');
+  const themeId: number = themes[0].id;
+
+  // 2. Read layout/theme.liquid
+  const { asset } = await shopifyFetch(
+    `themes/${themeId}/assets.json?asset[key]=layout/theme.liquid`,
+  );
+  const original: string = asset?.value;
+  if (!original) throw new Error('Could not read layout/theme.liquid');
+
+  // 3. Replace <title> tag content for the home page
+  // Matches: <title>Anything Here</title> (single-line, case-insensitive)
+  const titleRegex = /<title>[^<]*<\/title>/i;
+  if (!titleRegex.test(original)) throw new Error('<title> tag not found in layout/theme.liquid');
+
+  const patched = original.replace(titleRegex, `<title>${PROPOSED_TITLE}</title>`);
+  if (patched === original) throw new Error('Title tag already matches proposed value — no change needed');
+
+  // 4. Write back
+  await shopifyFetch(`themes/${themeId}/assets.json`, {
+    method: 'PUT',
+    body: JSON.stringify({ asset: { key: 'layout/theme.liquid', value: patched } }),
+  });
+}
 
 export async function POST(): Promise<NextResponse> {
   if (IS_MOCK) {
-    // Simulate latency for demo purposes
     await new Promise((resolve) => setTimeout(resolve, 2000));
     return NextResponse.json({ ok: true, mock: true });
   }
 
   try {
-    const { stdout, stderr } = await execAsync(COMMAND, {
-      timeout: 120_000,  // 2 min max
-      env: { ...process.env },
-    });
-
-    const output = stdout + stderr;
-    const success = output.includes('[theme-apply]') && !output.includes('Error:');
-
-    if (!success) {
-      return NextResponse.json(
-        { ok: false, error: 'CLI did not complete successfully', output: output.slice(-1000) },
-        { status: 500 },
-      );
-    }
-
-    return NextResponse.json({ ok: true, output: output.slice(-500) });
+    await applyTitleFix();
+    return NextResponse.json({ ok: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
