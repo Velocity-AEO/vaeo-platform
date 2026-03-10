@@ -8,7 +8,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "node --import tsx/esm --test app/api/onboarding/shopify/handler.test.ts"
+    "test": "node --import tsx/esm --test app/api/all-tests.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.98.0",
