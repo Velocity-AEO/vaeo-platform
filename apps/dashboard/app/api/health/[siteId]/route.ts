@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
-import { calculateHealthScore } from '@vaeo/scoring';
+import { calculateHealthScore } from '@/lib/scoring';
 
 export async function GET(
   _req: Request,

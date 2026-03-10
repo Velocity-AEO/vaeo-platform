@@ -1,6 +1,6 @@
 import { createServerClient } from './supabase';
 import type { ActionQueueRow, CommandCenterRow, CommandCenterStats, DashboardStats, RunSummary, Site, SiteWithStats } from './types';
-import { calculateHealthScore } from '@vaeo/scoring';
+import { calculateHealthScore } from '@/lib/scoring';
 
 // ── Dashboard home ────────────────────────────────────────────────────────────
 
