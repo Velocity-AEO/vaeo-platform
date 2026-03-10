@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '../../../../lib/supabase.js';
-import { handleShopifyOnboarding, OnboardingDeps } from './handler.js';
+import { createServerClient } from '../../../../lib/supabase';
+import { handleShopifyOnboarding, OnboardingDeps } from './handler';
 
 /** Real Shopify Admin API verifier */
 async function realVerifyShopify(storeUrl: string, accessToken: string) {

@@ -148,7 +148,7 @@ export async function getAllSites(): Promise<SiteWithStats[]> {
 
   // Build reverse map: run_id → site_id (for scoping issues to latest run only)
   const runIdToSiteId = new Map<string, string>();
-  for (const [siteId, { run_id }] of latestBySite) {
+  for (const [siteId, { run_id }] of Array.from(latestBySite)) {
     runIdToSiteId.set(run_id, siteId);
   }
   const latestRunIds = Array.from(runIdToSiteId.keys());

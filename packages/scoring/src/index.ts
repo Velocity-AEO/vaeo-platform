@@ -32,13 +32,13 @@ const TECHNICAL_RULES: Record<string, [number, number]> = {
   ERR_REDIRECT_LOOP:   [5, 15],
 };
 
-const CANONICAL_TYPES = new Set([
+const CANONICAL_TYPES = [
   'CANONICAL_MISSING',
   'CANONICAL_MISMATCH',
   'CANONICAL_RELATIVE',
   'CANONICAL_REDIRECT',
   'CANONICAL_CHAIN',
-]);
+];
 const CANONICAL_RULE: [number, number] = [3, 12];
 
 const CONTENT_RULES: Record<string, [number, number]> = {
