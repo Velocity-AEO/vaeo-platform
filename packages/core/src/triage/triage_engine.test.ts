@@ -14,12 +14,14 @@ import {
   recommend,
   triageItem,
   triageBatch,
+  triageWithPriority,
   isSystemUrl,
   type TriageItem,
   type TriageDeps,
   type TriageRecommendation,
   type TriageImpact,
   type TracerObservation,
+  type GscData,
 } from './triage_engine.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -590,5 +592,108 @@ describe('triageItem — writeLearning tracer observations', () => {
       makeItem({ id: 'b3', url: 'https://example.com/products/c' }),
     ], deps);
     assert.equal(captured.length, 3);
+  });
+});
+
+// ── GSC reasoning enrichment ──────────────────────────────────────────────────
+
+describe('triageItem — GSC reasoning in results', () => {
+  it('includes GSC data in reason when gscData provided', async () => {
+    const item = makeItem({
+      url:     'https://example.com/products/widget',
+      gscData: { clicks: 500, impressions: 10000, position: 3.2 },
+    });
+    const result = await triageItem(item, noopDeps());
+    assert.ok(result.reason.includes('500 clicks/month'));
+    assert.ok(result.reason.includes('position 3'));
+  });
+
+  it('includes high impact label for clicks > 100', async () => {
+    const item = makeItem({
+      url:     'https://example.com/products/widget',
+      gscData: { clicks: 200, impressions: 5000, position: 5 },
+    });
+    const result = await triageItem(item, noopDeps());
+    assert.ok(result.reason.includes('Priority impact: high'));
+  });
+
+  it('includes medium impact label for clicks > 10', async () => {
+    const item = makeItem({
+      url:     'https://example.com/products/widget',
+      gscData: { clicks: 50, impressions: 1000, position: 8 },
+    });
+    const result = await triageItem(item, noopDeps());
+    assert.ok(result.reason.includes('Priority impact: medium'));
+  });
+
+  it('includes low impact label for clicks <= 10', async () => {
+    const item = makeItem({
+      url:     'https://example.com/products/widget',
+      gscData: { clicks: 5, impressions: 200, position: 20 },
+    });
+    const result = await triageItem(item, noopDeps());
+    assert.ok(result.reason.includes('Priority impact: low'));
+  });
+
+  it('reason has no GSC suffix when gscData is absent', async () => {
+    const result = await triageItem(makeItem(), noopDeps());
+    assert.ok(!result.reason.includes('clicks/month'));
+  });
+
+  it('GSC reasoning appended to AI-reviewed results', async () => {
+    const deps = noopDeps({
+      aiReview: async () => ({
+        recommendation: 'deploy' as TriageRecommendation,
+        impact:         'medium' as TriageImpact,
+        reason:         'Worth fixing',
+      }),
+    });
+    const item = makeItem({
+      issue_type: 'SCHEMA_MISSING',
+      url:        'https://example.com/pages/about',
+      gscData:    { clicks: 300, impressions: 8000, position: 4 },
+    });
+    const result = await triageItem(item, deps);
+    assert.ok(result.reason.includes('Worth fixing'));
+    assert.ok(result.reason.includes('300 clicks/month'));
+  });
+});
+
+// ── triageWithPriority ────────────────────────────────────────────────────────
+
+describe('triageWithPriority', () => {
+  it('returns results sorted by priorityScore descending', async () => {
+    const items = [
+      makeItem({ id: 'low',  url: 'https://example.com/products/a', priorityScore: 5 }),
+      makeItem({ id: 'high', url: 'https://example.com/products/b', priorityScore: 20 }),
+      makeItem({ id: 'mid',  url: 'https://example.com/products/c', priorityScore: 12 }),
+    ];
+    const result = await triageWithPriority(items, noopDeps());
+    assert.equal(result.ok, true);
+    assert.equal(result.results[0]!.item_id, 'high');
+    assert.equal(result.results[1]!.item_id, 'mid');
+    assert.equal(result.results[2]!.item_id, 'low');
+  });
+
+  it('defaults priorityScore to 0 when not provided', async () => {
+    const items = [makeItem({ id: 'x1' })];
+    const result = await triageWithPriority(items, noopDeps());
+    assert.equal(result.results[0]!.priorityScore, 0);
+  });
+
+  it('preserves triage fields alongside priorityScore', async () => {
+    const items = [makeItem({ id: 'p1', url: 'https://example.com/products/x', priorityScore: 15 })];
+    const result = await triageWithPriority(items, noopDeps());
+    const r = result.results[0]!;
+    assert.equal(r.item_id, 'p1');
+    assert.equal(r.priorityScore, 15);
+    assert.ok(r.recommendation);
+    assert.ok(r.reason);
+  });
+
+  it('handles empty items list', async () => {
+    const result = await triageWithPriority([], noopDeps());
+    assert.equal(result.ok, true);
+    assert.equal(result.results.length, 0);
   });
 });

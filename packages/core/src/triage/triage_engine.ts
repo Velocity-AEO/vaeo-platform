@@ -37,6 +37,12 @@
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+export interface GscData {
+  clicks:      number;
+  impressions: number;
+  position:    number;
+}
+
 export interface TriageItem {
   id:                      string;
   issue_type:              string;
@@ -47,6 +53,10 @@ export interface TriageItem {
   proposed_fix:            Record<string, unknown>;
   /** Field snapshots captured before any changes (AI trigger #2). */
   tracer_field_snapshots?: Record<string, unknown>;
+  /** Priority score from priority_scorer (optional enrichment). */
+  priorityScore?:          number;
+  /** Google Search Console traffic data (optional enrichment). */
+  gscData?:                GscData;
 }
 
 export type TriageRecommendation = 'deploy' | 'skip' | 'review';
@@ -295,6 +305,14 @@ function shouldEscalateToAI(
   return false;
 }
 
+// ── GSC enrichment ────────────────────────────────────────────────────────────
+
+function gscReasoning(gsc?: GscData): string {
+  if (!gsc) return '';
+  const impact = gsc.clicks > 100 ? 'high' : gsc.clicks > 10 ? 'medium' : 'low';
+  return ` | This page gets ${gsc.clicks} clicks/month at position ${Math.round(gsc.position)}. Priority impact: ${impact}`;
+}
+
 // ── Single-item triage ────────────────────────────────────────────────────────
 
 /** Core triage logic (no observation write). */
@@ -309,7 +327,7 @@ async function triageItemCore(
       triage_score:   0,
       recommendation: 'skip',
       impact:         'none',
-      reason:         'System URL — no SEO impact; skip always',
+      reason:         'System URL — no SEO impact; skip always' + gscReasoning(item.gscData),
       ai_reviewed:    false,
     };
   }
@@ -321,7 +339,7 @@ async function triageItemCore(
       triage_score:   pageTypeScore(item.url),
       recommendation: 'skip',
       impact:         'low',
-      reason:         `Policy/legal page — low SEO value; skip (${item.issue_type})`,
+      reason:         `Policy/legal page — low SEO value; skip (${item.issue_type})` + gscReasoning(item.gscData),
       ai_reviewed:    false,
     };
   }
@@ -339,7 +357,7 @@ async function triageItemCore(
         triage_score:   score,
         recommendation: ai.recommendation,
         impact:         ai.impact,
-        reason:         ai.reason,
+        reason:         ai.reason + gscReasoning(item.gscData),
         ai_reviewed:    true,
       };
     } catch {
@@ -352,7 +370,7 @@ async function triageItemCore(
         triage_score:   score,
         recommendation: fallbackRec,
         impact,
-        reason:         `${item.issue_type} — AI review failed, manual review needed`,
+        reason:         `${item.issue_type} — AI review failed, manual review needed` + gscReasoning(item.gscData),
         ai_reviewed:    false,
       };
     }
@@ -368,7 +386,7 @@ async function triageItemCore(
       triage_score:   score,
       recommendation: matrix.kind,
       impact,
-      reason,
+      reason:         reason + gscReasoning(item.gscData),
       ai_reviewed:    false,
     };
   }
@@ -380,7 +398,7 @@ async function triageItemCore(
     triage_score:   score,
     recommendation: rec,
     impact,
-    reason:         `${item.issue_type} on page (score ${score}) → ${rec}`,
+    reason:         `${item.issue_type} on page (score ${score}) → ${rec}` + gscReasoning(item.gscData),
     ai_reviewed:    false,
   };
 }
@@ -449,6 +467,44 @@ export async function triageBatch(
       ok:      false,
       results: [],
       summary: { total: 0, deploy: 0, skip: 0, review: 0, ai_escalations: 0 },
+      error:   err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+// ── Priority-enriched triage ───────────────────────────────────────────────
+
+export interface PrioritizedTriageResult extends TriageResult {
+  priorityScore: number;
+}
+
+/**
+ * Triage items with priority scoring.
+ * Scores each item using priority_scorer factors, triages them,
+ * and returns results sorted by priorityScore descending.
+ * Never throws.
+ */
+export async function triageWithPriority(
+  items: TriageItem[],
+  deps:  TriageDeps,
+): Promise<{ ok: boolean; results: PrioritizedTriageResult[]; error?: string }> {
+  try {
+    const results: PrioritizedTriageResult[] = [];
+
+    for (const item of items) {
+      const triageResult = await triageItem(item, deps);
+      results.push({
+        ...triageResult,
+        priorityScore: item.priorityScore ?? 0,
+      });
+    }
+
+    results.sort((a, b) => b.priorityScore - a.priorityScore);
+    return { ok: true, results };
+  } catch (err) {
+    return {
+      ok:      false,
+      results: [],
       error:   err instanceof Error ? err.message : String(err),
     };
   }
