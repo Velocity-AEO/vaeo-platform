@@ -85,13 +85,30 @@ export interface ApplyDeps {
     item:  ApprovedItem,
     creds: { access_token: string; store_url: string },
   ) => Promise<{ success: boolean; metafieldId?: string; schemaType?: string; error?: string }>;
+  /**
+   * Optional — performance fix pipeline (DEFER_SCRIPT, LAZY_IMAGE, FONT_DISPLAY).
+   * Generates a fix plan from proposed_fix and applies to theme HTML.
+   */
+  performanceApply?: (
+    item:  ApprovedItem,
+    creds: { access_token: string; store_url: string },
+  ) => Promise<{ success: boolean; action?: string; error?: string }>;
 }
 
 // ── Issue type → Shopify fix type mapping ───────────────────────────────────
 
 type ShopifyFixType = ShopifyFixRequest['fix_type'];
 
-function mapIssueToFixType(issueType: string): ShopifyFixType | null {
+/** Performance issue types that bypass the Shopify adapter. */
+const PERFORMANCE_ISSUE_TYPES = new Set(['DEFER_SCRIPT', 'LAZY_IMAGE', 'FONT_DISPLAY']);
+
+function isPerformanceIssue(issueType: string): boolean {
+  return PERFORMANCE_ISSUE_TYPES.has(issueType);
+}
+
+function mapIssueToFixType(issueType: string): ShopifyFixType | 'performance' | null {
+  // Performance issues are handled by a separate pipeline
+  if (isPerformanceIssue(issueType)) return 'performance';
   const lower = issueType.toLowerCase();
   if (lower.includes('title'))     return 'meta_title';
   if (lower.includes('meta') || lower.includes('desc')) return 'meta_description';
@@ -475,6 +492,55 @@ export async function applyFix(
       duration_ms: Date.now() - start,
     });
     return { action_id: item.id, success: false, fix_type: 'schema', error: errMsg };
+  }
+
+  // ── Performance intercept ──────────────────────────────────────────────
+  if (fixType === 'performance') {
+    if (!deps.performanceApply) {
+      // No performance pipeline configured — generate plan and log it
+      const { generateFixPlan } = await import('../optimize/performance_plan.js');
+      const plan = generateFixPlan({
+        issue_type: item.issue_type as import('../detect/performance_detect.js').PerformanceIssueType,
+        url:        item.url,
+        element:    (item.proposed_fix['element'] as string) ?? '',
+        fix_hint:   (item.proposed_fix['fix_hint'] as string) ?? '',
+      });
+      deps.writeLog({
+        action_id:   item.id,
+        stage:       'apply:performance-plan',
+        status:      'ok',
+        url:         item.url,
+        field:       plan.action,
+        after_value: plan.fixed,
+        duration_ms: Date.now() - start,
+      });
+      try { await deps.markDeployed(item.id); } catch { /* non-fatal */ }
+      return { action_id: item.id, success: true, fix_type: item.issue_type };
+    }
+    const pr = await deps.performanceApply(item, creds);
+    if (pr.success) {
+      try { await deps.markDeployed(item.id); } catch { /* non-fatal */ }
+      deps.writeLog({
+        action_id:   item.id,
+        stage:       'apply:deployed',
+        status:      'ok',
+        url:         item.url,
+        field:       pr.action ?? item.issue_type,
+        duration_ms: Date.now() - start,
+      });
+      return { action_id: item.id, success: true, fix_type: item.issue_type };
+    }
+    const errMsg = pr.error ?? 'Performance apply failed';
+    try { await deps.markFailed(item.id, errMsg); } catch { /* non-fatal */ }
+    deps.writeLog({
+      action_id:   item.id,
+      stage:       'apply:failed',
+      status:      'failed',
+      url:         item.url,
+      error:       errMsg,
+      duration_ms: Date.now() - start,
+    });
+    return { action_id: item.id, success: false, fix_type: item.issue_type, error: errMsg };
   }
 
   // Build Shopify fix request
