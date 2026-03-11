@@ -11,10 +11,14 @@ import { calculateHealthScore } from '../../../../lib/scoring.js';
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export interface SiteRow {
-  site_id:    string;
-  site_url:   string;
-  cms_type:   string;
-  created_at: string;
+  site_id:        string;
+  site_url:       string;
+  cms_type:       string;
+  created_at:     string;
+  /** Persisted by the onboard/audit command — null until first run. */
+  health_score:   number | null;
+  health_grade:   string | null;
+  last_scored_at: string | null;
 }
 
 export interface IssueRow {
@@ -24,16 +28,18 @@ export interface IssueRow {
 }
 
 export interface ClientSite {
-  site_id:       string;
-  site_url:      string;
-  domain:        string;
-  cms_type:      string;
-  health_score:  number;
-  grade:         string;
-  issues_found:  number;
-  issues_fixed:  number;
-  last_scan:     string | null;
-  created_at:    string;
+  site_id:        string;
+  site_url:       string;
+  domain:         string;
+  cms_type:       string;
+  health_score:   number;
+  health_grade:   string;
+  grade:          string;   // alias for health_grade — kept for backwards compat
+  issues_found:   number;
+  issues_fixed:   number;
+  last_scan:      string | null;
+  last_scored_at: string | null;
+  created_at:     string;
 }
 
 export interface ClientSitesResult {
@@ -88,19 +94,24 @@ export async function getClientSites(
       const openIssues = siteIssues.filter((i) => OPEN_STATUSES.has(i.execution_status));
       const fixedIssues = siteIssues.filter((i) => FIXED_STATUSES.has(i.execution_status));
 
-      const score = calculateHealthScore(openIssues);
+      // Prefer persisted score (written by onboard/audit); fall back to live calculation.
+      const computed    = calculateHealthScore(openIssues);
+      const healthScore = site.health_score ?? computed.total;
+      const healthGrade = site.health_grade ?? computed.grade;
 
       return {
-        site_id:      site.site_id,
-        site_url:     site.site_url,
-        domain:       site.site_url.replace(/^https?:\/\//, ''),
-        cms_type:     site.cms_type,
-        health_score: score.total,
-        grade:        score.grade,
-        issues_found: siteIssues.length,
-        issues_fixed: fixedIssues.length,
-        last_scan:    lastScans.get(site.site_id) ?? null,
-        created_at:   site.created_at,
+        site_id:        site.site_id,
+        site_url:       site.site_url,
+        domain:         site.site_url.replace(/^https?:\/\//, ''),
+        cms_type:       site.cms_type,
+        health_score:   healthScore,
+        health_grade:   healthGrade,
+        grade:          healthGrade,
+        issues_found:   siteIssues.length,
+        issues_fixed:   fixedIssues.length,
+        last_scan:      lastScans.get(site.site_id) ?? null,
+        last_scored_at: site.last_scored_at ?? null,
+        created_at:     site.created_at,
       };
     });
 

@@ -23,10 +23,13 @@ let siteCounter = 0;
 function makeSite(overrides: Partial<SiteRow> = {}): SiteRow {
   siteCounter++;
   return {
-    site_id:    `site-${siteCounter.toString().padStart(3, '0')}`,
-    site_url:   `https://store${siteCounter}.myshopify.com`,
-    cms_type:   'shopify',
-    created_at: '2025-01-15T00:00:00Z',
+    site_id:        `site-${siteCounter.toString().padStart(3, '0')}`,
+    site_url:       `https://store${siteCounter}.myshopify.com`,
+    cms_type:       'shopify',
+    created_at:     '2025-01-15T00:00:00Z',
+    health_score:   null,
+    health_grade:   null,
+    last_scored_at: null,
     ...overrides,
   };
 }
@@ -70,6 +73,7 @@ describe('getClientSites — happy path', () => {
     assert.equal(s.domain, 'myshop.myshopify.com');
     assert.equal(s.cms_type, 'shopify');
     assert.equal(typeof s.health_score, 'number');
+    assert.equal(typeof s.health_grade, 'string');
     assert.equal(typeof s.grade, 'string');
     assert.equal(typeof s.issues_found, 'number');
     assert.equal(typeof s.issues_fixed, 'number');
@@ -161,6 +165,60 @@ describe('getClientSites — health scoring', () => {
     const s2 = result.sites!.find((s) => s.site_id === site2.site_id)!;
     assert.ok(s1.health_score < 100);
     assert.equal(s2.health_score, 100);
+  });
+});
+
+// ── Stored health score (from onboard/audit write) ───────────────────────────
+
+describe('getClientSites — stored health score', () => {
+  it('uses stored health_score and health_grade from DB when present', async () => {
+    const site = makeSite({ health_score: 72, health_grade: 'B' });
+    const result = await getClientSites(TENANT_ID, happyDeps({
+      loadSites: async () => [site],
+      // Issues would otherwise compute a different score
+      loadAllIssues: async () => [
+        makeIssue(site.site_id, { issue_type: 'META_TITLE_MISSING', execution_status: 'queued' }),
+        makeIssue(site.site_id, { issue_type: 'H1_MISSING', execution_status: 'queued' }),
+      ],
+    }));
+    assert.equal(result.sites![0].health_score, 72);
+    assert.equal(result.sites![0].health_grade, 'B');
+    assert.equal(result.sites![0].grade, 'B');
+  });
+
+  it('falls back to computed score when stored values are null', async () => {
+    const site = makeSite({ health_score: null, health_grade: null });
+    const result = await getClientSites(TENANT_ID, happyDeps({
+      loadSites: async () => [site],
+      loadAllIssues: async () => [],
+    }));
+    assert.equal(result.sites![0].health_score, 100);
+    assert.equal(result.sites![0].health_grade, 'A');
+  });
+
+  it('includes last_scored_at when stored', async () => {
+    const ts = '2026-03-10T12:00:00Z';
+    const site = makeSite({ last_scored_at: ts });
+    const result = await getClientSites(TENANT_ID, happyDeps({
+      loadSites: async () => [site],
+    }));
+    assert.equal(result.sites![0].last_scored_at, ts);
+  });
+
+  it('last_scored_at is null when not yet scored', async () => {
+    const site = makeSite({ last_scored_at: null });
+    const result = await getClientSites(TENANT_ID, happyDeps({
+      loadSites: async () => [site],
+    }));
+    assert.equal(result.sites![0].last_scored_at, null);
+  });
+
+  it('grade is an alias for health_grade', async () => {
+    const site = makeSite({ health_grade: 'C' });
+    const result = await getClientSites(TENANT_ID, happyDeps({
+      loadSites: async () => [site],
+    }));
+    assert.equal(result.sites![0].grade, result.sites![0].health_grade);
   });
 });
 

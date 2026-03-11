@@ -157,7 +157,11 @@ const realUpdateHealthScore: OnboardOps['updateHealthScore'] = async (siteId, sc
   const db = createClient(cfg.supabaseUrl, cfg.supabaseServiceKey, { auth: { persistSession: false } });
   const { error } = await db
     .from('sites')
-    .update({ health_score: score })
+    .update({
+      health_score:   score.score,
+      health_grade:   score.grade,
+      last_scored_at: new Date().toISOString(),
+    })
     .eq('site_id', siteId);
   if (error) throw new Error(`sites health_score update failed: ${error.message}`);
 };

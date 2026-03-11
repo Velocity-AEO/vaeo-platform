@@ -11,4 +11,5 @@ import './sites/[siteId]/health/handler.test.ts';
 import './auth/login/handler.test.ts';
 import './auth/magic-link/handler.test.ts';
 import './tenants/me/handler.test.ts';
+import './client/sites/handler.test.ts';
 import '../../../../tools/badge/badge.test.ts';
