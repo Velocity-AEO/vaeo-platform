@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -92,6 +92,28 @@ function timeAgo(iso: string): string {
   return `${days}d ago`;
 }
 
+// ── Copy button ──────────────────────────────────────────────────────────────
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }, [text]);
+
+  return (
+    <button
+      onClick={handleCopy}
+      className="shrink-0 px-2.5 py-1.5 rounded text-xs font-medium transition-colors bg-slate-100 hover:bg-slate-200 text-slate-600"
+    >
+      {copied ? 'Copied!' : 'Copy'}
+    </button>
+  );
+}
+
 // ── Component ────────────────────────────────────────────────────────────────
 
 export default function ClientDashboard() {
@@ -99,6 +121,9 @@ export default function ClientDashboard() {
   const [tenant, setTenant]     = useState<TenantInfo | null>(null);
   const [fixes, setFixes]       = useState<RecentFix[]>([]);
   const [loading, setLoading]   = useState(true);
+  const [origin, setOrigin]     = useState('');
+
+  useEffect(() => { setOrigin(window.location.origin); }, []);
 
   useEffect(() => {
     Promise.all([
@@ -269,7 +294,33 @@ export default function ClientDashboard() {
                     )}
                   </div>
 
+                  {/* Your Badge */}
                   <div className="mt-4 pt-3 border-t border-slate-100">
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Your Badge</p>
+                    <div className="flex items-center gap-3 mb-3">
+                      {/* Badge preview — rendered as an img from the badge API */}
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={`/api/badge/${site.site_id}`}
+                        alt={`Velocity Verified badge for ${site.domain}`}
+                        className="h-10"
+                      />
+                      <Link
+                        href={`/verify/${site.site_id}`}
+                        className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+                      >
+                        View Verify Card
+                      </Link>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 text-[11px] bg-slate-50 border border-slate-200 rounded px-2.5 py-1.5 text-slate-600 font-mono truncate">
+                        {`<script src="${origin}/api/badge/${site.site_id}/embed"></script>`}
+                      </code>
+                      <CopyButton text={`<script src="${origin}/api/badge/${site.site_id}/embed"></script>`} />
+                    </div>
+                  </div>
+
+                  <div className="mt-3 pt-3 border-t border-slate-100">
                     <Link
                       href={`/sites/${site.site_id}`}
                       className="text-sm text-blue-600 hover:text-blue-700 font-medium"
