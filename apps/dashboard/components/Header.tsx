@@ -1,5 +1,6 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 
@@ -7,6 +8,8 @@ const NAV = [
   { href: '/dashboard',  label: 'My Dashboard'   },
   { href: '/',           label: 'Operator'       },
   { href: '/fixes',      label: 'Fixes'          },
+  { href: '/approvals',  label: 'Approvals'      },
+  { href: '/learnings',  label: 'Learnings'      },
   { href: '/runs',       label: 'Runs'           },
   { href: '/sites',      label: 'Sites'          },
   { href: '/queue',      label: 'Command Center' },
@@ -17,6 +20,24 @@ const NAV = [
 export default function Header() {
   const pathname = usePathname();
   const router   = useRouter();
+  const [pendingCount, setPendingCount] = useState(0);
+
+  // Fetch pending approvals count for badge
+  useEffect(() => {
+    if (pathname === '/login') return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res  = await fetch('/api/approvals');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled && Array.isArray(data)) {
+          setPendingCount(data.filter((d: { status: string }) => d.status === 'pending').length);
+        }
+      } catch { /* non-fatal */ }
+    })();
+    return () => { cancelled = true; };
+  }, [pathname]);
 
   // Don't render on auth pages — login page uses a full-screen overlay.
   if (pathname === '/login') return null;
@@ -33,18 +54,23 @@ export default function Header() {
           <span className="text-base font-bold tracking-tight">Velocity AEO</span>
           <span className="text-[10px] text-slate-400 uppercase tracking-widest">Operator Dashboard</span>
         </div>
-        <nav className="flex items-center gap-1 flex-1">
+        <nav className="flex items-center gap-1 flex-1 overflow-x-auto">
           {NAV.map((n) => (
             <Link
               key={n.href}
               href={n.href}
-              className={`px-3 py-1.5 rounded text-sm transition-colors ${
+              className={`px-3 py-1.5 rounded text-sm transition-colors whitespace-nowrap flex items-center gap-1.5 ${
                 pathname === n.href
                   ? 'bg-white/15 text-white'
                   : 'text-slate-300 hover:text-white hover:bg-white/10'
               }`}
             >
               {n.label}
+              {n.href === '/approvals' && pendingCount > 0 && (
+                <span className="bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
+                  {pendingCount}
+                </span>
+              )}
             </Link>
           ))}
         </nav>
