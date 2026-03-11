@@ -11,6 +11,8 @@
  * module is fully testable without a database.
  */
 
+import { queryPatterns, type PatternDb } from '../learning/pattern_engine.ts';
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export interface ActionRow {
@@ -57,6 +59,8 @@ export interface ReasoningDeps {
   findSiblingIssues: (runId: string, url: string, excludeId: string) => Promise<string[]>;
   /** Persist the reasoning_block on the action_queue row. */
   storeBlock: (actionId: string, block: ReasoningBlock) => Promise<void>;
+  /** Optional learning DB for historical pattern context. */
+  learningDb?: PatternDb;
 }
 
 // ── Issue-type metadata ──────────────────────────────────────────────────────
@@ -385,6 +389,18 @@ export async function generateReasoningBlock(
     deps.findSiblingIssues(row.run_id, row.url, row.id),
   ]);
 
+  // Optional: fetch historical pattern summary for context
+  let historicalContext = '';
+  if (deps.learningDb) {
+    try {
+      const patterns = await queryPatterns({ issue_type: row.issue_type, db: deps.learningDb, min_samples: 1 });
+      if (patterns.length > 0) {
+        const p = patterns[0];
+        historicalContext = ` Past fixes of this type succeeded ${Math.round(p.success_rate * 100)}% of the time (${p.total} samples).`;
+      }
+    } catch { /* non-fatal */ }
+  }
+
   const options = meta.optionGenerator(row);
   const recommendedOption = options[0].label;
 
@@ -404,7 +420,7 @@ export async function generateReasoningBlock(
       issue:         meta.label,
       current_value: extractCurrentValue(row),
     },
-    why:                meta.rule,
+    why:                meta.rule + historicalContext,
     proposed: {
       change:       meta.defaultChange,
       target_value: extractTargetValue(row),

@@ -13,6 +13,9 @@
  *   - Never throws — individual failures are captured in results
  */
 
+import type { PatternDb } from '../learning/pattern_engine.ts';
+import { scoreConfidence, type ConfidenceScore } from '../learning/confidence_scorer.ts';
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export type PageType = 'product' | 'collection' | 'page' | 'article' | 'index';
@@ -27,21 +30,23 @@ export interface GenerateParams {
 }
 
 export interface TitleResult {
-  url:            string;
-  proposed_title: string;
-  reasoning:      string;
-  char_count:     number;
-  confidence:     number;
-  error?:         string;
+  url:                   string;
+  proposed_title:        string;
+  reasoning:             string;
+  char_count:            number;
+  confidence:            number;
+  historical_confidence?: ConfidenceScore;
+  error?:                string;
 }
 
 export interface MetaResult {
-  url:           string;
-  proposed_meta: string;
-  reasoning:     string;
-  char_count:    number;
-  confidence:    number;
-  error?:        string;
+  url:                   string;
+  proposed_meta:         string;
+  reasoning:             string;
+  char_count:            number;
+  confidence:            number;
+  historical_confidence?: ConfidenceScore;
+  error?:                string;
 }
 
 export interface BatchResult {
@@ -64,6 +69,8 @@ export interface TitleMetaDeps {
   callAI: (systemPrompt: string, userPrompt: string) => Promise<AIResponse>;
   /** Update tracer_field_snapshots.proposed_value for a given url + field_type. */
   updateSnapshot: (url: string, fieldType: string, proposedValue: string) => Promise<void>;
+  /** Optional learning DB for historical confidence context. */
+  learningDb?: PatternDb;
 }
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -211,7 +218,15 @@ export async function generateTitle(
   const deps = { ...defaultDeps(), ..._testDeps };
 
   try {
-    const prompt = buildTitlePrompt(params);
+    // Optional historical confidence context
+    let historicalScore: ConfidenceScore | undefined;
+    let historicalCtx = '';
+    if (deps.learningDb) {
+      historicalScore = await scoreConfidence('title_missing', params.current_title, deps.learningDb);
+      historicalCtx = `\n\nHistorical success rate for this fix type: ${Math.round(historicalScore.success_rate * 100)}%\nBased on ${historicalScore.samples} past fixes. Adjust suggestion accordingly.`;
+    }
+
+    const prompt = buildTitlePrompt(params) + historicalCtx;
     const raw = await deps.callAI(SYSTEM_PROMPT, prompt);
 
     // Server-side truncation at word boundary
@@ -222,11 +237,12 @@ export async function generateTitle(
     await deps.updateSnapshot(params.url, 'title', proposed);
 
     return {
-      url:            params.url,
-      proposed_title: proposed,
-      reasoning:      raw.reasoning,
-      char_count:     proposed.length,
+      url:                   params.url,
+      proposed_title:        proposed,
+      reasoning:             raw.reasoning,
+      char_count:            proposed.length,
       confidence,
+      historical_confidence: historicalScore,
     };
   } catch (err) {
     return {
@@ -251,7 +267,15 @@ export async function generateMetaDescription(
   const deps = { ...defaultDeps(), ..._testDeps };
 
   try {
-    const prompt = buildMetaPrompt(params);
+    // Optional historical confidence context
+    let historicalScore: ConfidenceScore | undefined;
+    let historicalCtx = '';
+    if (deps.learningDb) {
+      historicalScore = await scoreConfidence('meta_missing', params.current_title, deps.learningDb);
+      historicalCtx = `\n\nHistorical success rate for this fix type: ${Math.round(historicalScore.success_rate * 100)}%\nBased on ${historicalScore.samples} past fixes. Adjust suggestion accordingly.`;
+    }
+
+    const prompt = buildMetaPrompt(params) + historicalCtx;
     const raw = await deps.callAI(SYSTEM_PROMPT, prompt);
 
     // Server-side truncation at word boundary
@@ -262,11 +286,12 @@ export async function generateMetaDescription(
     await deps.updateSnapshot(params.url, 'meta_description', proposed);
 
     return {
-      url:           params.url,
-      proposed_meta: proposed,
-      reasoning:     raw.reasoning,
-      char_count:    proposed.length,
+      url:                   params.url,
+      proposed_meta:         proposed,
+      reasoning:             raw.reasoning,
+      char_count:            proposed.length,
       confidence,
+      historical_confidence: historicalScore,
     };
   } catch (err) {
     return {
