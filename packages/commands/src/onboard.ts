@@ -137,7 +137,17 @@ const realLoadFieldSnapshots: OnboardOps['loadFieldSnapshots'] = async (siteId, 
     .eq('site_id', siteId)
     .eq('run_id', runId);
   if (error) throw new Error(`tracer_field_snapshots load failed: ${error.message}`);
-  return (data ?? []) as FieldSnapshotRow[];
+  // Map actual DB columns → internal FieldSnapshotRow
+  return (data ?? []).map((r: Record<string, unknown>) => ({
+    run_id:        r.run_id as string,
+    site_id:       r.site_id as string,
+    url:           r.url as string,
+    field_type:    r.field_name as string,
+    current_value: r.current_value as string | null,
+    char_count:    typeof r.current_value === 'string' ? (r.current_value as string).length : 0,
+    issue_flag:    false,
+    issue_type:    null,
+  })) as FieldSnapshotRow[];
 };
 
 const realUpdateHealthScore: OnboardOps['updateHealthScore'] = async (siteId, score) => {

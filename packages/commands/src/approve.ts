@@ -132,14 +132,17 @@ const realLoadPendingItems: ApproveCommandOps['loadPendingItems'] = async (siteI
   });
   const { data, error } = await db
     .from('action_queue')
-    .select('*')
+    .select('id, run_id, tenant_id, site_id, issue_type, url, risk_score, priority, proposed_fix, execution_status')
     .eq('site_id', siteId)
     .eq('execution_status', 'pending_approval')
-    .not('reasoning_block', 'is', null)
     .order('priority', { ascending: true })
     .order('risk_score', { ascending: true });
   if (error) throw new Error(`action_queue load failed: ${error.message}`);
-  return (data ?? []) as PendingApprovalItem[];
+  // Map to PendingApprovalItem — reasoning_block not in DB, default to null
+  return (data ?? []).map((r: Record<string, unknown>) => ({
+    ...r,
+    reasoning_block: null,
+  })) as PendingApprovalItem[];
 };
 
 const realMarkApproved: ApproveCommandOps['markApproved'] = async (itemId) => {

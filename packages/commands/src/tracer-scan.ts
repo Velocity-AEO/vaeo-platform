@@ -273,9 +273,19 @@ const realUpsertUrlInventory: TracerScanOps['upsertUrlInventory'] = async (rows)
   const db = createClient(cfg.supabaseUrl, cfg.supabaseServiceKey, {
     auth: { persistSession: false },
   });
+  // Map internal UrlInventoryRow → actual DB columns
+  const dbRows = rows.map((r) => ({
+    site_id:       r.site_id,
+    url:           r.url,
+    status_code:   r.status === '404' ? 404 : r.status === 'deleted' ? 500 : 200,
+    content_type:  'text/html',
+    is_protected:  false,
+    discovered_at: r.first_seen,
+    last_seen_at:  r.last_seen,
+  }));
   const { error } = await db
     .from('tracer_url_inventory')
-    .upsert(rows, { onConflict: 'site_id,url' });
+    .upsert(dbRows, { onConflict: 'site_id,url' });
   if (error) throw new Error(`tracer_url_inventory upsert failed: ${error.message}`);
   return rows.length;
 };
@@ -287,9 +297,17 @@ const realWriteFieldSnapshots: TracerScanOps['writeFieldSnapshots'] = async (row
   const db = createClient(cfg.supabaseUrl, cfg.supabaseServiceKey, {
     auth: { persistSession: false },
   });
+  // Map internal FieldSnapshotRow → actual DB columns
+  const dbRows = rows.map((r) => ({
+    run_id:        r.run_id,
+    site_id:       r.site_id,
+    url:           r.url,
+    field_name:    r.field_type,
+    current_value: r.current_value,
+  }));
   const { error } = await db
     .from('tracer_field_snapshots')
-    .insert(rows);
+    .insert(dbRows);
   if (error) throw new Error(`tracer_field_snapshots insert failed: ${error.message}`);
   return rows.length;
 };

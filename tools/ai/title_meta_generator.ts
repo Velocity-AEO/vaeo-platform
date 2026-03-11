@@ -170,8 +170,10 @@ async function realCallAI(systemPrompt: string, userPrompt: string): Promise<AIR
     content: Array<{ type: string; text: string }>;
   };
 
-  const text = data.content.find((c) => c.type === 'text')?.text ?? '';
-  return JSON.parse(text.trim()) as AIResponse;
+  let text = data.content.find((c) => c.type === 'text')?.text ?? '';
+  // Strip markdown code fences if present (```json ... ```)
+  text = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/, '').trim();
+  return JSON.parse(text) as AIResponse;
 }
 
 async function realUpdateSnapshot(url: string, fieldType: string, proposedValue: string): Promise<void> {
