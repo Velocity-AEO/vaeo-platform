@@ -281,6 +281,68 @@ describe('applyFix', () => {
   });
 });
 
+describe('applyFix — triage gate', () => {
+  it('skips item with triage_recommendation=skip', async () => {
+    const deps = makeDeps();
+    const item = makeItem({ triage_recommendation: 'skip' });
+
+    const result = await applyFix(item, deps);
+
+    assert.equal(result.success, false);
+    assert.match(result.error!, /Skipped by triage.*skip/);
+
+    const logs = (deps as unknown as { _logs: Array<Record<string, unknown>> })._logs;
+    assert.equal(logs[0].stage, 'apply:skipped');
+  });
+
+  it('skips item with triage_recommendation=review without override', async () => {
+    const deps = makeDeps();
+    const item = makeItem({ triage_recommendation: 'review' });
+
+    const result = await applyFix(item, deps);
+
+    assert.equal(result.success, false);
+    assert.match(result.error!, /review/);
+  });
+
+  it('applies item with triage_recommendation=review when overrideReview=true', async () => {
+    const deps = makeDeps();
+    const item = makeItem({ triage_recommendation: 'review' });
+
+    const result = await applyFix(item, deps, { overrideReview: true });
+
+    assert.equal(result.success, true);
+  });
+
+  it('applies item with triage_recommendation=deploy', async () => {
+    const deps = makeDeps();
+    const item = makeItem({ triage_recommendation: 'deploy' });
+
+    const result = await applyFix(item, deps);
+
+    assert.equal(result.success, true);
+  });
+
+  it('applies item with null triage_recommendation (not triaged)', async () => {
+    const deps = makeDeps();
+    const item = makeItem({ triage_recommendation: null });
+
+    const result = await applyFix(item, deps);
+
+    assert.equal(result.success, true);
+  });
+
+  it('applies item with undefined triage_recommendation', async () => {
+    const deps = makeDeps();
+    const item = makeItem();
+    // triage_recommendation is not set (undefined)
+
+    const result = await applyFix(item, deps);
+
+    assert.equal(result.success, true);
+  });
+});
+
 describe('applyBatch', () => {
   it('applies multiple items and returns summary', async () => {
     const deps = makeDeps();

@@ -32,6 +32,8 @@ export interface ApprovedItem {
   priority:         number;
   proposed_fix:     Record<string, unknown>;
   execution_status: string;
+  /** Triage recommendation — checked before applying. */
+  triage_recommendation?: string | null;
 }
 
 export interface ApplyResult {
@@ -235,10 +237,15 @@ function defaultDeps(): ApplyDeps {
  * 5. On failure: mark failed, log
  *
  * Never throws.
+ *
+ * Options:
+ *   overrideReview — if true, items with triage_recommendation='review' will
+ *                    be applied anyway. Default: false.
  */
 export async function applyFix(
   item:      ApprovedItem,
   _testDeps?: Partial<ApplyDeps>,
+  options?:  { overrideReview?: boolean },
 ): Promise<ApplyResult> {
   const deps = { ...defaultDeps(), ..._testDeps };
   const start = Date.now();
@@ -250,6 +257,39 @@ export async function applyFix(
       success:   false,
       fix_type:  item.issue_type,
       error:     `Item is not approved (status: ${item.execution_status})`,
+    };
+  }
+
+  // ── Triage gate ──────────────────────────────────────────────────────────
+  if (item.triage_recommendation === 'skip') {
+    deps.writeLog({
+      action_id: item.id,
+      stage:     'apply:skipped',
+      status:    'skipped',
+      url:       item.url,
+      error:     'Triage recommendation: skip',
+    });
+    return {
+      action_id: item.id,
+      success:   false,
+      fix_type:  item.issue_type,
+      error:     'Skipped by triage (recommendation: skip)',
+    };
+  }
+
+  if (item.triage_recommendation === 'review' && !options?.overrideReview) {
+    deps.writeLog({
+      action_id: item.id,
+      stage:     'apply:skipped',
+      status:    'skipped',
+      url:       item.url,
+      error:     'Triage recommendation: review (no override)',
+    });
+    return {
+      action_id: item.id,
+      success:   false,
+      fix_type:  item.issue_type,
+      error:     'Skipped by triage (recommendation: review — pass overrideReview to apply)',
     };
   }
 
@@ -362,6 +402,7 @@ export async function applyFix(
 export async function applyBatch(
   items:     ApprovedItem[],
   _testDeps?: Partial<ApplyDeps>,
+  options?:  { overrideReview?: boolean },
 ): Promise<ApplyBatchResult> {
   const results: ApplyResult[] = [];
   const errors: string[] = [];
@@ -369,7 +410,7 @@ export async function applyBatch(
   let failed  = 0;
 
   for (const item of items) {
-    const result = await applyFix(item, _testDeps);
+    const result = await applyFix(item, _testDeps, options);
     results.push(result);
     if (result.success) {
       applied++;
