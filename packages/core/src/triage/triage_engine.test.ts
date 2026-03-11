@@ -1,7 +1,7 @@
 /**
- * packages/core/triage/triage_engine.test.ts
+ * packages/core/src/triage/triage_engine.test.ts
  *
- * Tests for the triage engine — scoring, recommendations, AI escalation.
+ * Tests for the SEO triage engine — scoring, recommendations, AI escalation.
  * All AI calls mocked via injectable TriageDeps.
  */
 
@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 
 import {
   scoreItem,
+  pageTypeScore,
   recommend,
   triageItem,
   triageBatch,
@@ -17,9 +18,11 @@ import {
   type TriageItem,
   type TriageDeps,
   type TriageRecommendation,
+  type TriageImpact,
+  type TracerObservation,
 } from './triage_engine.js';
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function makeItem(overrides: Partial<TriageItem> = {}): TriageItem {
   return {
@@ -36,12 +39,16 @@ function makeItem(overrides: Partial<TriageItem> = {}): TriageItem {
 
 function noopDeps(overrides: Partial<TriageDeps> = {}): TriageDeps {
   return {
-    aiReview: async () => ({ recommendation: 'review' as TriageRecommendation, reason: 'AI says review' }),
+    aiReview: async () => ({
+      recommendation: 'review' as TriageRecommendation,
+      impact:         'medium' as TriageImpact,
+      reason:         'AI says review',
+    }),
     ...overrides,
   };
 }
 
-// ── System URL detection ─────────────────────────────────────────────────────
+// ── isSystemUrl ───────────────────────────────────────────────────────────────
 
 describe('isSystemUrl', () => {
   it('detects /cart as system', () => {
@@ -56,6 +63,9 @@ describe('isSystemUrl', () => {
   it('detects /search as system', () => {
     assert.equal(isSystemUrl('/search'), true);
   });
+  it('detects /customer_authentication as system', () => {
+    assert.equal(isSystemUrl('https://example.com/customer_authentication'), true);
+  });
   it('detects /account/login subpath', () => {
     assert.equal(isSystemUrl('https://example.com/account/login'), true);
   });
@@ -65,17 +75,46 @@ describe('isSystemUrl', () => {
   it('does not flag /pages/ as system', () => {
     assert.equal(isSystemUrl('https://example.com/pages/about'), false);
   });
-  it('does not flag / as system', () => {
+  it('does not flag homepage as system', () => {
     assert.equal(isSystemUrl('https://example.com/'), false);
   });
 });
 
-// ── Score: system URLs ───────────────────────────────────────────────────────
+// ── pageTypeScore ─────────────────────────────────────────────────────────────
+
+describe('pageTypeScore', () => {
+  it('/products/ → 90', () => {
+    assert.equal(pageTypeScore('https://example.com/products/widget'), 90);
+  });
+  it('/collections/ → 80', () => {
+    assert.equal(pageTypeScore('https://example.com/collections/summer'), 80);
+  });
+  it('/blogs/ → 70', () => {
+    assert.equal(pageTypeScore('https://example.com/blogs/news/post'), 70);
+  });
+  it('/articles/ → 70', () => {
+    assert.equal(pageTypeScore('https://example.com/articles/my-post'), 70);
+  });
+  it('/pages/ → 40', () => {
+    assert.equal(pageTypeScore('https://example.com/pages/about'), 40);
+  });
+  it('system URL → 0', () => {
+    assert.equal(pageTypeScore('https://example.com/cart'), 0);
+  });
+  it('other → 20', () => {
+    assert.equal(pageTypeScore('https://example.com/some-page'), 20);
+  });
+  it('homepage / → 85', () => {
+    assert.equal(pageTypeScore('https://example.com/'), 85);
+  });
+});
+
+// ── scoreItem ─────────────────────────────────────────────────────────────────
 
 describe('scoreItem — system URLs', () => {
-  it('system URL always returns score 0', () => {
+  it('system URL always returns triage_score 0', () => {
     const result = scoreItem(makeItem({ url: 'https://example.com/cart' }));
-    assert.equal(result.score, 0);
+    assert.equal(result.triage_score, 0);
   });
 
   it('system URL reason mentions system URL', () => {
@@ -83,179 +122,127 @@ describe('scoreItem — system URLs', () => {
     assert.ok(result.reason.includes('System URL'));
   });
 
-  it('/checkout returns score 0', () => {
+  it('/checkout returns triage_score 0', () => {
     const result = scoreItem(makeItem({ url: 'https://example.com/checkout' }));
-    assert.equal(result.score, 0);
+    assert.equal(result.triage_score, 0);
   });
 });
 
-// ── Score: product pages ─────────────────────────────────────────────────────
-
 describe('scoreItem — product pages', () => {
-  it('META_TITLE_MISSING on /products/ returns deploy-range score', () => {
+  it('META_TITLE_MISSING on /products/ returns triage_score 90', () => {
     const result = scoreItem(makeItem({
       issue_type: 'META_TITLE_MISSING',
       url:        'https://example.com/products/blue-widget',
-      risk_score: 5,
     }));
-    // pageType(30) + issueWeight(25) + riskBonus(10) = 65
-    assert.ok(result.score >= 65, `Expected >= 65, got ${result.score}`);
-    assert.equal(recommend(result.score), 'deploy');
+    assert.equal(result.triage_score, 90);
+    assert.equal(recommend(result.triage_score), 'deploy');
   });
 
-  it('title_missing on /products/ also returns deploy', () => {
-    const result = scoreItem(makeItem({
-      issue_type: 'title_missing',
-      url:        'https://example.com/products/red-hat',
-      risk_score: 5,
-    }));
-    assert.ok(result.score >= 65);
-  });
-});
-
-// ── Score: low-value pages ───────────────────────────────────────────────────
-
-describe('scoreItem — low-value pages', () => {
-  it('SCHEMA_MISSING on /pages/privacy-policy returns skip', () => {
-    const result = scoreItem(makeItem({
-      issue_type: 'SCHEMA_MISSING',
-      url:        'https://example.com/pages/privacy-policy',
-    }));
-    assert.ok(result.score <= 35, `Expected <= 35, got ${result.score}`);
-    assert.equal(recommend(result.score), 'skip');
-  });
-
-  it('/pages/terms-of-service also capped', () => {
+  it('/collections/ returns triage_score 80', () => {
     const result = scoreItem(makeItem({
       issue_type: 'META_TITLE_MISSING',
-      url:        'https://example.com/pages/terms-of-service',
-    }));
-    assert.ok(result.score <= 30);
-  });
-
-  it('reason mentions low-value page', () => {
-    const result = scoreItem(makeItem({
-      issue_type: 'SCHEMA_MISSING',
-      url:        'https://example.com/pages/privacy-policy',
-    }));
-    assert.ok(result.reason.toLowerCase().includes('low-value'));
-  });
-});
-
-// ── Score: ambiguous range ───────────────────────────────────────────────────
-
-describe('scoreItem — ambiguous range', () => {
-  it('minor issue on content page falls in review range', () => {
-    // pageType(/pages/) = 15, issueWeight(title_too_long) = 5, risk=5 → bonus=10 → total=30
-    // Actually let's pick something that lands in 36-64
-    const result = scoreItem(makeItem({
-      issue_type: 'meta_too_short',
       url:        'https://example.com/collections/summer',
-      risk_score: 3,
     }));
-    // pageType(25) + issueWeight(8) + riskBonus(6) = 39
-    assert.ok(result.score > 35 && result.score < 65,
-      `Expected 36-64, got ${result.score}`);
-    assert.equal(recommend(result.score), 'review');
+    assert.equal(result.triage_score, 80);
+    assert.equal(recommend(result.triage_score), 'deploy');
   });
 });
 
-// ── recommend() ──────────────────────────────────────────────────────────────
+describe('scoreItem — /pages/ in review band', () => {
+  it('/pages/ returns triage_score 40 (review zone)', () => {
+    const result = scoreItem(makeItem({
+      issue_type: 'canonical_missing',
+      url:        'https://example.com/pages/about',
+    }));
+    assert.equal(result.triage_score, 40);
+    assert.equal(recommend(result.triage_score), 'review');
+  });
+});
+
+// ── recommend() ───────────────────────────────────────────────────────────────
 
 describe('recommend', () => {
   it('score >= 65 → deploy', () => assert.equal(recommend(65), 'deploy'));
   it('score 100 → deploy', () => assert.equal(recommend(100), 'deploy'));
-  it('score <= 35 → skip', () => assert.equal(recommend(35), 'skip'));
-  it('score 0 → skip', () => assert.equal(recommend(0), 'skip'));
-  it('score 50 → review', () => assert.equal(recommend(50), 'review'));
-  it('score 36 → review', () => assert.equal(recommend(36), 'review'));
-  it('score 64 → review', () => assert.equal(recommend(64), 'review'));
+  it('score <= 35 → skip',  () => assert.equal(recommend(35), 'skip'));
+  it('score 0 → skip',      () => assert.equal(recommend(0), 'skip'));
+  it('score 50 → review',   () => assert.equal(recommend(50), 'review'));
+  it('score 36 → review',   () => assert.equal(recommend(36), 'review'));
+  it('score 64 → review',   () => assert.equal(recommend(64), 'review'));
 });
 
-// ── triageItem — AI escalation ───────────────────────────────────────────────
+// ── triageItem — system URL ───────────────────────────────────────────────────
 
-describe('triageItem — AI escalation', () => {
-  it('triggers AI review for ambiguous scores (35–65)', async () => {
-    const item = makeItem({
-      issue_type: 'meta_too_short',
-      url:        'https://example.com/collections/summer',
-      risk_score: 3,
-    });
-
+describe('triageItem — system URL', () => {
+  it('returns triage_score=0, skip, no AI call for /cart', async () => {
     let aiCalled = false;
     const deps = noopDeps({
-      aiReview: async () => {
-        aiCalled = true;
-        return { recommendation: 'deploy' as TriageRecommendation, reason: 'Content page with user value' };
-      },
+      aiReview: async () => { aiCalled = true; return { recommendation: 'deploy', impact: 'high', reason: '' }; },
     });
 
-    const result = await triageItem(item, deps);
-    assert.equal(aiCalled, true);
-    assert.equal(result.ai_reviewed, true);
-    assert.equal(result.recommendation, 'deploy');
-    assert.ok(result.reason.includes('AI'));
+    const result = await triageItem(makeItem({ url: 'https://example.com/cart' }), deps);
+
+    assert.equal(result.triage_score, 0);
+    assert.equal(result.recommendation, 'skip');
+    assert.equal(result.impact, 'none');
+    assert.equal(aiCalled, false);
+    assert.equal(result.ai_reviewed, false);
   });
 
-  it('does NOT call AI for clear deploy (score >= 65)', async () => {
+  it('/account → triage_score=0, skip, no AI', async () => {
+    let aiCalled = false;
+    const deps = noopDeps({ aiReview: async () => { aiCalled = true; return { recommendation: 'deploy', impact: 'high', reason: '' }; } });
+
+    const result = await triageItem(makeItem({ url: 'https://example.com/account' }), deps);
+
+    assert.equal(result.triage_score, 0);
+    assert.equal(result.recommendation, 'skip');
+    assert.equal(aiCalled, false);
+  });
+});
+
+// ── triageItem — matrix: META_TITLE_MISSING on /products/ ────────────────────
+
+describe('triageItem — META_TITLE_MISSING on /products/', () => {
+  it('returns deploy without calling AI', async () => {
+    let aiCalled = false;
+    const deps = noopDeps({
+      aiReview: async () => { aiCalled = true; return { recommendation: 'skip', impact: 'low', reason: '' }; },
+    });
     const item = makeItem({
       issue_type: 'META_TITLE_MISSING',
-      url:        'https://example.com/products/widget',
-      risk_score: 5,
-    });
-
-    let aiCalled = false;
-    const deps = noopDeps({
-      aiReview: async () => { aiCalled = true; return { recommendation: 'deploy', reason: '' }; },
+      url:        'https://example.com/products/blue-widget',
     });
 
     const result = await triageItem(item, deps);
-    assert.equal(aiCalled, false);
-    assert.equal(result.ai_reviewed, false);
+
     assert.equal(result.recommendation, 'deploy');
-  });
-
-  it('does NOT call AI for clear skip (score <= 35)', async () => {
-    const item = makeItem({
-      issue_type: 'SCHEMA_MISSING',
-      url:        'https://example.com/pages/privacy-policy',
-    });
-
-    let aiCalled = false;
-    const deps = noopDeps({
-      aiReview: async () => { aiCalled = true; return { recommendation: 'skip', reason: '' }; },
-    });
-
-    const result = await triageItem(item, deps);
+    assert.equal(result.triage_score, 90);
     assert.equal(aiCalled, false);
-    assert.equal(result.recommendation, 'skip');
+    assert.equal(result.ai_reviewed, false);
   });
 
-  it('falls back to review when AI throws', async () => {
-    const item = makeItem({
-      issue_type: 'meta_too_short',
-      url:        'https://example.com/collections/summer',
-      risk_score: 3,
-    });
+  it('META_DESC_MISSING on /collections/ → deploy, no AI', async () => {
+    let aiCalled = false;
+    const deps = noopDeps({ aiReview: async () => { aiCalled = true; return { recommendation: 'skip', impact: 'low', reason: '' }; } });
 
-    const deps = noopDeps({
-      aiReview: async () => { throw new Error('API unavailable'); },
-    });
+    const result = await triageItem(
+      makeItem({ issue_type: 'META_DESC_MISSING', url: 'https://example.com/collections/summer' }),
+      deps,
+    );
 
-    const result = await triageItem(item, deps);
-    assert.equal(result.recommendation, 'review');
-    assert.equal(result.ai_reviewed, false);
-    assert.ok(result.reason.includes('AI review failed'));
+    assert.equal(result.recommendation, 'deploy');
+    assert.equal(aiCalled, false);
   });
 });
 
-// ── triageItem — system URL with SCHEMA_MISSING ──────────────────────────────
+// ── triageItem — policy page hard skip ───────────────────────────────────────
 
-describe('triageItem — system URL without AI call', () => {
-  it('SCHEMA_MISSING on /pages/privacy-policy returns skip without AI call', async () => {
+describe('triageItem — policy page hard skip', () => {
+  it('SCHEMA_MISSING on /pages/privacy-policy → skip without AI call', async () => {
     let aiCalled = false;
     const deps = noopDeps({
-      aiReview: async () => { aiCalled = true; return { recommendation: 'deploy', reason: '' }; },
+      aiReview: async () => { aiCalled = true; return { recommendation: 'deploy', impact: 'high', reason: '' }; },
     });
 
     const result = await triageItem(
@@ -264,25 +251,226 @@ describe('triageItem — system URL without AI call', () => {
     );
 
     assert.equal(result.recommendation, 'skip');
-    assert.equal(aiCalled, false, 'AI should not be called for clear skip');
+    assert.equal(aiCalled, false, 'AI must NOT be called for policy pages');
+  });
+
+  it('/pages/terms-of-service → skip without AI call', async () => {
+    let aiCalled = false;
+    const deps = noopDeps({ aiReview: async () => { aiCalled = true; return { recommendation: 'deploy', impact: 'high', reason: '' }; } });
+
+    const result = await triageItem(
+      makeItem({ issue_type: 'META_TITLE_MISSING', url: 'https://example.com/pages/terms-of-service' }),
+      deps,
+    );
+
+    assert.equal(result.recommendation, 'skip');
+    assert.equal(aiCalled, false);
   });
 });
 
-// ── triageBatch ──────────────────────────────────────────────────────────────
+// ── triageItem — AI escalation: /pages/ + SCHEMA_MISSING ─────────────────────
+
+describe('triageItem — AI escalation: /pages/ + SCHEMA_MISSING', () => {
+  it('calls AI for SCHEMA_MISSING on /pages/about (non-policy)', async () => {
+    let aiCalled = false;
+    const deps = noopDeps({
+      aiReview: async () => {
+        aiCalled = true;
+        return { recommendation: 'deploy' as TriageRecommendation, impact: 'medium' as TriageImpact, reason: 'Content page worth fixing' };
+      },
+    });
+
+    const result = await triageItem(
+      makeItem({ issue_type: 'SCHEMA_MISSING', url: 'https://example.com/pages/about' }),
+      deps,
+    );
+
+    assert.equal(aiCalled, true);
+    assert.equal(result.ai_reviewed, true);
+    assert.equal(result.recommendation, 'deploy');
+    assert.equal(result.reason, 'Content page worth fixing');
+  });
+});
+
+// ── triageItem — AI escalation: META_TITLE_MISSING + title in snapshots ──────
+
+describe('triageItem — AI escalation: META_TITLE_MISSING + tracer snapshots', () => {
+  it('calls AI when title exists in tracer_field_snapshots', async () => {
+    let aiCalled = false;
+    const deps = noopDeps({
+      aiReview: async () => {
+        aiCalled = true;
+        return { recommendation: 'skip' as TriageRecommendation, impact: 'low' as TriageImpact, reason: 'Title already exists in live page' };
+      },
+    });
+    const item = makeItem({
+      issue_type:              'META_TITLE_MISSING',
+      url:                     'https://example.com/products/widget',
+      tracer_field_snapshots:  { title: 'Widget | Example Store' },
+    });
+
+    const result = await triageItem(item, deps);
+
+    assert.equal(aiCalled, true);
+    assert.equal(result.ai_reviewed, true);
+    assert.equal(result.recommendation, 'skip');
+  });
+
+  it('does NOT call AI for META_TITLE_MISSING without title in snapshots', async () => {
+    let aiCalled = false;
+    const deps = noopDeps({ aiReview: async () => { aiCalled = true; return { recommendation: 'skip', impact: 'low', reason: '' }; } });
+
+    const result = await triageItem(
+      makeItem({ issue_type: 'META_TITLE_MISSING', url: 'https://example.com/products/widget' }),
+      deps,
+    );
+
+    assert.equal(aiCalled, false);
+    assert.equal(result.recommendation, 'deploy'); // matrix: META_TITLE_MISSING → deploy
+  });
+});
+
+// ── triageItem — AI escalation: score 35–65 ───────────────────────────────────
+
+describe('triageItem — AI escalation: score in review band (35–65)', () => {
+  it('calls AI for canonical_missing on /pages/about (score=40)', async () => {
+    let aiCalled = false;
+    const deps = noopDeps({
+      aiReview: async () => {
+        aiCalled = true;
+        return { recommendation: 'deploy' as TriageRecommendation, impact: 'medium' as TriageImpact, reason: 'Worth fixing for content page' };
+      },
+    });
+
+    const result = await triageItem(
+      makeItem({ issue_type: 'canonical_missing', url: 'https://example.com/pages/about' }),
+      deps,
+    );
+
+    assert.equal(aiCalled, true);
+    assert.equal(result.triage_score, 40);
+    assert.equal(result.ai_reviewed, true);
+  });
+
+  it('does NOT call AI for score >= 65 (clear deploy)', async () => {
+    let aiCalled = false;
+    const deps = noopDeps({ aiReview: async () => { aiCalled = true; return { recommendation: 'deploy', impact: 'high', reason: '' }; } });
+
+    const result = await triageItem(
+      makeItem({ issue_type: 'canonical_missing', url: 'https://example.com/products/widget' }),
+      deps,
+    );
+
+    // No matrix match + score=90 → deploy, no AI
+    assert.equal(aiCalled, false);
+    assert.equal(result.recommendation, 'deploy');
+  });
+
+  it('does NOT call AI for score <= 35 (clear skip)', async () => {
+    let aiCalled = false;
+    const deps = noopDeps({ aiReview: async () => { aiCalled = true; return { recommendation: 'skip', impact: 'low', reason: '' }; } });
+
+    const result = await triageItem(
+      makeItem({ issue_type: 'canonical_missing', url: 'https://example.com/some-other-page' }),
+      deps,
+    );
+
+    // score=20 → skip, no AI
+    assert.equal(aiCalled, false);
+    assert.equal(result.recommendation, 'skip');
+  });
+});
+
+// ── triageItem — hard skip: IMG_DIMENSIONS_MISSING elsewhere ─────────────────
+
+describe('triageItem — hard skip: IMG_DIMENSIONS_MISSING elsewhere', () => {
+  it('IMG_DIMENSIONS_MISSING on /blogs/ → hard skip, no AI', async () => {
+    let aiCalled = false;
+    const deps = noopDeps({ aiReview: async () => { aiCalled = true; return { recommendation: 'deploy', impact: 'high', reason: '' }; } });
+
+    const result = await triageItem(
+      makeItem({ issue_type: 'IMG_DIMENSIONS_MISSING', url: 'https://example.com/blogs/news/my-post' }),
+      deps,
+    );
+
+    assert.equal(result.recommendation, 'skip');
+    assert.equal(aiCalled, false, 'AI must NOT be called for hard-skip IMG issues');
+  });
+
+  it('IMG_DIMENSIONS_MISSING on /pages/ → hard skip, no AI', async () => {
+    let aiCalled = false;
+    const deps = noopDeps({ aiReview: async () => { aiCalled = true; return { recommendation: 'deploy', impact: 'high', reason: '' }; } });
+
+    const result = await triageItem(
+      makeItem({ issue_type: 'IMG_DIMENSIONS_MISSING', url: 'https://example.com/pages/about' }),
+      deps,
+    );
+
+    assert.equal(result.recommendation, 'skip');
+    assert.equal(aiCalled, false);
+  });
+
+  it('IMG_DIMENSIONS_MISSING on /products/ → deploy (high-value page)', async () => {
+    const result = await triageItem(
+      makeItem({ issue_type: 'IMG_DIMENSIONS_MISSING', url: 'https://example.com/products/widget' }),
+      noopDeps(),
+    );
+
+    assert.equal(result.recommendation, 'deploy');
+  });
+});
+
+// ── triageItem — SCHEMA_MISSING matrix ───────────────────────────────────────
+
+describe('triageItem — SCHEMA_MISSING matrix', () => {
+  it('SCHEMA_MISSING on /collections/ → deploy (no AI)', async () => {
+    let aiCalled = false;
+    const deps = noopDeps({ aiReview: async () => { aiCalled = true; return { recommendation: 'skip', impact: 'low', reason: '' }; } });
+
+    const result = await triageItem(
+      makeItem({ issue_type: 'SCHEMA_MISSING', url: 'https://example.com/collections/summer' }),
+      deps,
+    );
+
+    assert.equal(result.recommendation, 'deploy');
+    assert.equal(aiCalled, false);
+  });
+});
+
+// ── triageItem — AI fallback on error ────────────────────────────────────────
+
+describe('triageItem — AI fallback on error', () => {
+  it('falls back to review when AI throws for ambiguous score', async () => {
+    const deps = noopDeps({
+      aiReview: async () => { throw new Error('API unavailable'); },
+    });
+
+    const result = await triageItem(
+      makeItem({ issue_type: 'canonical_missing', url: 'https://example.com/pages/about' }),
+      deps,
+    );
+
+    assert.equal(result.recommendation, 'review');
+    assert.equal(result.ai_reviewed, false);
+    assert.ok(result.reason.includes('AI review failed'));
+  });
+});
+
+// ── triageBatch ───────────────────────────────────────────────────────────────
 
 describe('triageBatch', () => {
-  it('returns summary with correct counts', async () => {
+  it('returns correct summary counts', async () => {
     const items = [
-      makeItem({ id: 'a1', issue_type: 'META_TITLE_MISSING', url: 'https://example.com/products/x', risk_score: 5 }),
-      makeItem({ id: 'a2', issue_type: 'SCHEMA_MISSING', url: 'https://example.com/cart' }),
-      makeItem({ id: 'a3', issue_type: 'SCHEMA_MISSING', url: 'https://example.com/pages/privacy-policy' }),
+      makeItem({ id: 'a1', issue_type: 'META_TITLE_MISSING', url: 'https://example.com/products/x' }),
+      makeItem({ id: 'a2', issue_type: 'SCHEMA_MISSING',     url: 'https://example.com/cart' }),
+      makeItem({ id: 'a3', issue_type: 'SCHEMA_MISSING',     url: 'https://example.com/pages/privacy-policy' }),
     ];
 
     const result = await triageBatch(items, noopDeps());
     assert.equal(result.ok, true);
     assert.equal(result.summary.total, 3);
-    assert.equal(result.summary.deploy, 1);   // a1: product page + critical issue
-    assert.equal(result.summary.skip, 2);     // a2: system URL, a3: privacy policy
+    assert.equal(result.summary.deploy, 1); // a1: META_TITLE_MISSING on /products/ → deploy
+    assert.equal(result.summary.skip, 2);   // a2: system URL, a3: policy page
   });
 
   it('handles empty batch', async () => {
@@ -293,44 +481,114 @@ describe('triageBatch', () => {
 
   it('counts AI escalations', async () => {
     const items = [
-      makeItem({ id: 'a1', issue_type: 'meta_too_short', url: 'https://example.com/collections/summer', risk_score: 3 }),
-      makeItem({ id: 'a2', issue_type: 'meta_too_short', url: 'https://example.com/collections/winter', risk_score: 3 }),
+      makeItem({ id: 'a1', issue_type: 'SCHEMA_MISSING', url: 'https://example.com/pages/about' }),
+      makeItem({ id: 'a2', issue_type: 'SCHEMA_MISSING', url: 'https://example.com/pages/contact' }),
     ];
 
     const deps = noopDeps({
-      aiReview: async () => ({ recommendation: 'deploy' as TriageRecommendation, reason: 'valuable content' }),
+      aiReview: async () => ({
+        recommendation: 'deploy' as TriageRecommendation,
+        impact:         'medium' as TriageImpact,
+        reason:         'content page worth fixing',
+      }),
     });
 
     const result = await triageBatch(items, deps);
     assert.equal(result.summary.ai_escalations, 2);
   });
 
+  it('item_id is set correctly on results', async () => {
+    const items = [
+      makeItem({ id: 'abc-123', url: 'https://example.com/products/x' }),
+    ];
+
+    const result = await triageBatch(items, noopDeps());
+    assert.equal(result.results[0]!.item_id, 'abc-123');
+  });
+
   it('never throws', async () => {
-    await assert.doesNotReject(() => triageBatch(
-      [makeItem()],
-      noopDeps(),
-    ));
+    await assert.doesNotReject(() => triageBatch([makeItem()], noopDeps()));
   });
 });
 
-// ── Score capping ────────────────────────────────────────────────────────────
+// ── triageItem — result shape ─────────────────────────────────────────────────
 
-describe('scoreItem — bounds', () => {
-  it('score never exceeds 100', () => {
-    const result = scoreItem(makeItem({
-      issue_type: 'META_TITLE_MISSING',
-      url:        'https://example.com/products/x',
-      risk_score: 10,
-    }));
-    assert.ok(result.score <= 100);
+describe('triageItem — result fields', () => {
+  it('result has item_id, triage_score, recommendation, impact, reason, ai_reviewed', async () => {
+    const result = await triageItem(makeItem(), noopDeps());
+    assert.ok('item_id'        in result);
+    assert.ok('triage_score'   in result);
+    assert.ok('recommendation' in result);
+    assert.ok('impact'         in result);
+    assert.ok('reason'         in result);
+    assert.ok('ai_reviewed'    in result);
   });
 
-  it('score never goes below 0', () => {
-    const result = scoreItem(makeItem({
-      issue_type: 'unknown_minor_thing',
-      url:        'https://example.com/other',
-      risk_score: 0,
-    }));
-    assert.ok(result.score >= 0);
+  it('item_id matches input id', async () => {
+    const result = await triageItem(makeItem({ id: 'xyz-789' }), noopDeps());
+    assert.equal(result.item_id, 'xyz-789');
+  });
+});
+
+// ── writeLearning — tracer observation wiring ─────────────────────────────────
+
+describe('triageItem — writeLearning tracer observations', () => {
+  function makeTracerDeps(captured: TracerObservation[], throwOnWrite = false): TriageDeps {
+    return {
+      ...noopDeps(),
+      writeLearning: async (obs) => {
+        if (throwOnWrite) throw new Error('DB down');
+        captured.push(obs);
+      },
+    };
+  }
+
+  it('calls writeLearning with tracer_observation status', async () => {
+    const captured: TracerObservation[] = [];
+    const deps = makeTracerDeps(captured);
+    await triageItem(makeItem({ url: 'https://example.com/products/x' }), deps);
+    assert.equal(captured.length, 1);
+    assert.equal(captured[0]!.sandbox_status, 'tracer_observation');
+    assert.equal(captured[0]!.approval_status, 'observation');
+  });
+
+  it('writes the correct url and issue_type', async () => {
+    const captured: TracerObservation[] = [];
+    const deps = makeTracerDeps(captured);
+    await triageItem(makeItem({ id: 'x1', url: 'https://shop.com/products/hat', issue_type: 'SCHEMA_MISSING' }), deps);
+    assert.equal(captured[0]!.url, 'https://shop.com/products/hat');
+    assert.equal(captured[0]!.issue_type, 'SCHEMA_MISSING');
+  });
+
+  it('tracer_data contains the full TriageResult', async () => {
+    const captured: TracerObservation[] = [];
+    const deps = makeTracerDeps(captured);
+    const result = await triageItem(makeItem({ id: 'r1', url: 'https://example.com/products/y' }), deps);
+    assert.deepEqual(captured[0]!.tracer_data, result);
+  });
+
+  it('does NOT call writeLearning when dep is omitted', async () => {
+    // noopDeps has no writeLearning — should not throw
+    await assert.doesNotReject(() => triageItem(makeItem(), noopDeps()));
+  });
+
+  it('writeLearning error is swallowed — result still returned', async () => {
+    const captured: TracerObservation[] = [];
+    const deps = makeTracerDeps(captured, /* throwOnWrite */ true);
+    // Should not throw even if writeLearning throws
+    const result = await triageItem(makeItem({ url: 'https://example.com/products/z' }), deps);
+    assert.ok(result.item_id);
+    assert.equal(captured.length, 0); // nothing was captured (threw before push)
+  });
+
+  it('triageBatch calls writeLearning for each item', async () => {
+    const captured: TracerObservation[] = [];
+    const deps = makeTracerDeps(captured);
+    await triageBatch([
+      makeItem({ id: 'b1', url: 'https://example.com/products/a' }),
+      makeItem({ id: 'b2', url: 'https://example.com/products/b' }),
+      makeItem({ id: 'b3', url: 'https://example.com/products/c' }),
+    ], deps);
+    assert.equal(captured.length, 3);
   });
 });
