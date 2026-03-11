@@ -77,6 +77,14 @@ export interface ApplyDeps {
     error?:        string;
     duration_ms?:  number;
   }) => void;
+  /**
+   * Optional — schema fix pipeline (generate + validate + write metafield + install snippet).
+   * When present, used instead of shopifyApplyFix for schema issue types.
+   */
+  schemaApply?: (
+    item:  ApprovedItem,
+    creds: { access_token: string; store_url: string },
+  ) => Promise<{ success: boolean; metafieldId?: string; schemaType?: string; error?: string }>;
 }
 
 // ── Issue type → Shopify fix type mapping ───────────────────────────────────
@@ -214,6 +222,126 @@ const realWriteLog: ApplyDeps['writeLog'] = (entry) => {
   })();
 };
 
+const realSchemaApply: NonNullable<ApplyDeps['schemaApply']> = async (item, creds) => {
+  try {
+    const { writeSchema }       = await import('../schema/schema_writer.js');
+    const { getLiveThemeId, installSnippet } = await import('../schema/snippet_installer.js');
+    const {
+      generateProductSchema,
+      generateCollectionSchema,
+      generatePageSchema,
+      generateArticleSchema,
+    } = await import('../schema/schema_generator.js');
+
+    const host    = creds.store_url.replace(/^https?:\/\//i, '').replace(/\/$/, '');
+    const shopUrl = `https://${host}`;
+    const headers = {
+      'X-Shopify-Access-Token': creds.access_token,
+      'Content-Type':           'application/json',
+    };
+
+    // 1. Route URL → resource type
+    const url = item.url;
+    let resourceType: 'product' | 'collection' | 'page' | 'article' | 'blog';
+    if (/\/products\//.test(url))                              resourceType = 'product';
+    else if (/\/collections\//.test(url))                     resourceType = 'collection';
+    else if (/\/blogs\/[^/]+\/[^/]+/.test(url))               resourceType = 'article';
+    else if (/\/blogs\/[^/]+/.test(url))                      resourceType = 'blog';
+    else                                                       resourceType = 'page';
+
+    // 2. Extract handle + look up numeric resource ID
+    const pathParts = new URL(url).pathname.split('/').filter(Boolean);
+    const handle    = pathParts[pathParts.length - 1] ?? '';
+
+    let lookupPath: string;
+    let lookupKey: string;
+    if      (resourceType === 'product')    { lookupPath = `/admin/api/2024-01/products.json?handle=${handle}&fields=id,title,body_html,images,variants,vendor`;         lookupKey = 'products'; }
+    else if (resourceType === 'collection') { lookupPath = `/admin/api/2024-01/custom_collections.json?handle=${handle}&fields=id,title,handle`;                          lookupKey = 'custom_collections'; }
+    else if (resourceType === 'article')    { lookupPath = `/admin/api/2024-01/articles.json?handle=${handle}&fields=id,title,handle,published_at`;                       lookupKey = 'articles'; }
+    else                                    { lookupPath = `/admin/api/2024-01/pages.json?handle=${handle}&fields=id,title,handle`;                                       lookupKey = 'pages'; }
+
+    const res = await fetch(`https://${host}${lookupPath}`, { method: 'GET', headers });
+    if (!res.ok) {
+      return { success: false, error: `Shopify resource lookup failed (${res.status}) for ${url}` };
+    }
+    const body = await res.json() as Record<string, unknown>;
+
+    const resourceData: Record<string, unknown> | null =
+      ((body[lookupKey] as Array<Record<string, unknown>> | undefined) ?? [])[0] ?? null;
+
+    if (!resourceData?.id) {
+      return { success: false, error: `No Shopify resource found for handle: ${handle}` };
+    }
+    const resourceId = String(resourceData.id);
+
+    // 3. Build schema — use proposed_fix.schema_json if available, else generate
+    let schemaJson: Record<string, unknown>;
+    if (item.proposed_fix['schema_json'] && typeof item.proposed_fix['schema_json'] === 'object') {
+      schemaJson = item.proposed_fix['schema_json'] as Record<string, unknown>;
+    } else if (resourceType === 'product') {
+      schemaJson = generateProductSchema({
+        id:       String(resourceData['id']),
+        title:    String(resourceData['title'] ?? ''),
+        body_html: resourceData['body_html'] as string | undefined,
+        image:    (resourceData['images'] as Array<{ src: string }> | undefined)?.[0],
+        variants: resourceData['variants'] as Array<{ price: string }> | undefined,
+        vendor:   resourceData['vendor']   as string | undefined,
+      }, shopUrl);
+    } else if (resourceType === 'collection') {
+      schemaJson = generateCollectionSchema({
+        id:     String(resourceData['id']),
+        title:  String(resourceData['title']  ?? ''),
+        handle: String(resourceData['handle'] ?? ''),
+      }, shopUrl);
+    } else if (resourceType === 'article') {
+      const urlParts   = pathParts; // already computed above
+      const blogHandle = urlParts.length >= 3 ? urlParts[urlParts.length - 2] : undefined;
+      schemaJson = generateArticleSchema({
+        id:           String(resourceData['id']),
+        title:        String(resourceData['title']  ?? ''),
+        handle:       String(resourceData['handle'] ?? ''),
+        url,
+        published_at: resourceData['published_at'] as string | undefined,
+        blog_handle:  blogHandle,
+      }, shopUrl);
+    } else {
+      schemaJson = generatePageSchema({
+        id:     String(resourceData['id']),
+        title:  String(resourceData['title']  ?? ''),
+        handle: String(resourceData['handle'] ?? ''),
+      }, shopUrl);
+    }
+
+    // 4. Write metafield
+    const writeResult = await writeSchema({
+      shopDomain:   host,
+      accessToken:  creds.access_token,
+      resourceType,
+      resourceId,
+      schemaJson,
+    });
+    if (!writeResult.ok) {
+      return { success: false, error: writeResult.error ?? 'writeSchema failed' };
+    }
+
+    // 5. Best-effort snippet install (non-fatal)
+    void (async () => {
+      try {
+        const themeId = await getLiveThemeId(host, creds.access_token);
+        if (themeId) await installSnippet(host, creds.access_token, themeId);
+      } catch { /* non-fatal */ }
+    })();
+
+    return {
+      success:    true,
+      metafieldId: writeResult.metafieldId,
+      schemaType:  String(schemaJson['@type'] ?? 'unknown'),
+    };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : String(err) };
+  }
+};
+
 function defaultDeps(): ApplyDeps {
   return {
     loadItem:         realLoadItem,
@@ -222,6 +350,7 @@ function defaultDeps(): ApplyDeps {
     markDeployed:     realMarkDeployed,
     markFailed:       realMarkFailed,
     writeLog:         realWriteLog,
+    schemaApply:      realSchemaApply,
   };
 }
 
@@ -318,6 +447,34 @@ export async function applyFix(
     try { await deps.markFailed(item.id, msg); } catch { /* non-fatal */ }
     deps.writeLog({ action_id: item.id, stage: 'apply:failed', status: 'failed', error: msg });
     return { action_id: item.id, success: false, fix_type: fixType, error: msg };
+  }
+
+  // ── Schema intercept ─────────────────────────────────────────────────────
+  if (fixType === 'schema' && deps.schemaApply) {
+    const sr = await deps.schemaApply(item, creds);
+    if (sr.success) {
+      try { await deps.markDeployed(item.id); } catch { /* non-fatal */ }
+      deps.writeLog({
+        action_id:   item.id,
+        stage:       'apply:deployed',
+        status:      'ok',
+        url:         item.url,
+        field:       'schema',
+        duration_ms: Date.now() - start,
+      });
+      return { action_id: item.id, success: true, fix_type: 'schema' };
+    }
+    const errMsg = sr.error ?? 'Schema apply failed';
+    try { await deps.markFailed(item.id, errMsg); } catch { /* non-fatal */ }
+    deps.writeLog({
+      action_id:   item.id,
+      stage:       'apply:failed',
+      status:      'failed',
+      url:         item.url,
+      error:       errMsg,
+      duration_ms: Date.now() - start,
+    });
+    return { action_id: item.id, success: false, fix_type: 'schema', error: errMsg };
   }
 
   // Build Shopify fix request

@@ -48,6 +48,8 @@ function makeDeps(overrides: Partial<ApplyDeps> = {}): ApplyDeps {
     markDeployed: async (id) => { marks.push({ type: 'deployed', id }); },
     markFailed:   async (id, error) => { marks.push({ type: 'failed', id, error }); },
     writeLog:     (entry) => { logs.push(entry); },
+    // Disable real schemaApply by default so schema tests fall through to shopifyApplyFix
+    schemaApply:  undefined,
     ...overrides,
     // Expose for assertions
     _logs:  logs,
@@ -340,6 +342,92 @@ describe('applyFix — triage gate', () => {
     const result = await applyFix(item, deps);
 
     assert.equal(result.success, true);
+  });
+});
+
+describe('applyFix — schemaApply dep', () => {
+  it('schema issue calls schemaApply dep, not shopifyApplyFix', async () => {
+    let shopifyCallCount = 0;
+    let schemaCallCount  = 0;
+    const deps = makeDeps({
+      shopifyApplyFix: async (req) => {
+        shopifyCallCount++;
+        return { action_id: req.action_id, success: true, fix_type: req.fix_type, sandbox: false };
+      },
+      schemaApply: async () => {
+        schemaCallCount++;
+        return { success: true, metafieldId: 'mf-999', schemaType: 'Product' };
+      },
+    });
+    const item = makeItem({ issue_type: 'schema_missing', proposed_fix: {} });
+
+    const result = await applyFix(item, deps);
+
+    assert.equal(result.success, true);
+    assert.equal(schemaCallCount,  1, 'schemaApply must be called');
+    assert.equal(shopifyCallCount, 0, 'shopifyApplyFix must NOT be called');
+  });
+
+  it('schemaApply success → markDeployed called and log stage=apply:deployed', async () => {
+    const deps = makeDeps({
+      schemaApply: async () => ({ success: true, metafieldId: 'mf-1', schemaType: 'Product' }),
+    });
+    const item = makeItem({ issue_type: 'schema_missing', proposed_fix: {} });
+
+    const result = await applyFix(item, deps);
+
+    assert.equal(result.success, true);
+    assert.equal(result.fix_type, 'schema');
+
+    const marks = (deps as unknown as { _marks: Array<{ type: string; id: string }> })._marks;
+    assert.equal(marks.length, 1);
+    assert.equal(marks[0].type, 'deployed');
+    assert.equal(marks[0].id,   'action-001');
+
+    const logs = (deps as unknown as { _logs: Array<Record<string, unknown>> })._logs;
+    const deployed = logs.find((l) => l.stage === 'apply:deployed');
+    assert.ok(deployed, 'apply:deployed log entry must exist');
+    assert.equal(deployed!.status, 'ok');
+    assert.equal(deployed!.field,  'schema');
+  });
+
+  it('schemaApply failure → markFailed called and log stage=apply:failed', async () => {
+    const deps = makeDeps({
+      schemaApply: async () => ({ success: false, error: 'metafield write failed' }),
+    });
+    const item = makeItem({ issue_type: 'schema_missing', proposed_fix: {} });
+
+    const result = await applyFix(item, deps);
+
+    assert.equal(result.success, false);
+    assert.match(result.error!, /metafield write failed/);
+
+    const marks = (deps as unknown as { _marks: Array<{ type: string; id: string; error?: string }> })._marks;
+    assert.equal(marks.length, 1);
+    assert.equal(marks[0].type, 'failed');
+    assert.match(marks[0].error!, /metafield write failed/);
+
+    const logs = (deps as unknown as { _logs: Array<Record<string, unknown>> })._logs;
+    const failLog = logs.find((l) => l.stage === 'apply:failed');
+    assert.ok(failLog, 'apply:failed log entry must exist');
+    assert.equal(failLog!.status, 'failed');
+  });
+
+  it('schema issue falls through to shopifyApplyFix when schemaApply not provided', async () => {
+    let shopifyCallCount = 0;
+    const deps = makeDeps({
+      shopifyApplyFix: async (req) => {
+        shopifyCallCount++;
+        return { action_id: req.action_id, success: true, fix_type: req.fix_type, sandbox: false };
+      },
+      // schemaApply intentionally not set
+    });
+    const item = makeItem({ issue_type: 'schema_missing', proposed_fix: {} });
+
+    const result = await applyFix(item, deps);
+
+    assert.equal(result.success, true);
+    assert.equal(shopifyCallCount, 1, 'shopifyApplyFix must be called as fallback');
   });
 });
 
