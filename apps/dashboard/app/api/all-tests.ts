@@ -13,3 +13,5 @@ import './auth/magic-link/handler.test.ts';
 import './tenants/me/handler.test.ts';
 import './client/sites/handler.test.ts';
 import '../../../../tools/badge/badge.test.ts';
+import './approvals/handler.test.ts';
+import './learnings/handler.test.ts';
