@@ -46,6 +46,8 @@ export interface ApplyResult {
   before_value?: Record<string, unknown>;
   /** Timestamp fixes applied to the page (timestamp pipeline only). */
   timestamp_fixes?: TimestampFix[];
+  /** Resource hints injected as a non-fatal post-processing step. */
+  resource_hints?: { injected_count: number; domains: string[] };
 }
 
 export interface ApplyBatchResult {
@@ -113,6 +115,15 @@ export interface ApplyDeps {
     item:  ApprovedItem,
     creds: { access_token: string; store_url: string },
   ) => Promise<{ success: boolean; action?: string; schema_type?: string; error?: string }>;
+  /**
+   * Optional — resource hint injection pipeline.
+   * Detects missing preconnect/dns-prefetch hints and injects them into the theme.
+   * Called non-fatally after any successful main fix. Never blocks the result.
+   */
+  resourceHintsApply?: (
+    item:  ApprovedItem,
+    creds: { access_token: string; store_url: string },
+  ) => Promise<{ injected_count: number; domains: string[]; error?: string }>;
 }
 
 // ── Issue type → Shopify fix type mapping ───────────────────────────────────
@@ -419,6 +430,27 @@ function defaultDeps(): ApplyDeps {
   };
 }
 
+// ── Resource hints helper ────────────────────────────────────────────────────
+
+/**
+ * Non-fatally run resource hints injection after a successful fix.
+ * Returns the hints metadata if any were injected, otherwise undefined.
+ */
+async function runResourceHints(
+  deps:  ApplyDeps,
+  item:  ApprovedItem,
+  creds: { access_token: string; store_url: string },
+): Promise<ApplyResult['resource_hints']> {
+  if (!deps.resourceHintsApply) return undefined;
+  try {
+    const r = await deps.resourceHintsApply(item, creds);
+    if (r.injected_count > 0) {
+      return { injected_count: r.injected_count, domains: r.domains };
+    }
+  } catch { /* non-fatal */ }
+  return undefined;
+}
+
 // ── applyFix ────────────────────────────────────────────────────────────────
 
 /**
@@ -527,7 +559,8 @@ export async function applyFix(
         field:       'schema',
         duration_ms: Date.now() - start,
       });
-      return { action_id: item.id, success: true, fix_type: 'schema' };
+      const rh_schema = await runResourceHints(deps, item, creds);
+      return { action_id: item.id, success: true, fix_type: 'schema', ...(rh_schema ? { resource_hints: rh_schema } : {}) };
     }
     const errMsg = sr.error ?? 'Schema apply failed';
     try { await deps.markFailed(item.id, errMsg); } catch { /* non-fatal */ }
@@ -563,7 +596,8 @@ export async function applyFix(
         duration_ms: Date.now() - start,
       });
       try { await deps.markDeployed(item.id); } catch { /* non-fatal */ }
-      return { action_id: item.id, success: true, fix_type: item.issue_type };
+      const rh_perf0 = await runResourceHints(deps, item, creds);
+      return { action_id: item.id, success: true, fix_type: item.issue_type, ...(rh_perf0 ? { resource_hints: rh_perf0 } : {}) };
     }
     const pr = await deps.performanceApply(item, creds);
     if (pr.success) {
@@ -576,7 +610,8 @@ export async function applyFix(
         field:       pr.action ?? item.issue_type,
         duration_ms: Date.now() - start,
       });
-      return { action_id: item.id, success: true, fix_type: item.issue_type };
+      const rh_perf = await runResourceHints(deps, item, creds);
+      return { action_id: item.id, success: true, fix_type: item.issue_type, ...(rh_perf ? { resource_hints: rh_perf } : {}) };
     }
     const errMsg = pr.error ?? 'Performance apply failed';
     try { await deps.markFailed(item.id, errMsg); } catch { /* non-fatal */ }
@@ -607,7 +642,8 @@ export async function applyFix(
           field:       ar.action ?? item.issue_type,
           duration_ms: Date.now() - start,
         });
-        return { action_id: item.id, success: true, fix_type: item.issue_type };
+        const rh_aeo0 = await runResourceHints(deps, item, creds);
+        return { action_id: item.id, success: true, fix_type: item.issue_type, ...(rh_aeo0 ? { resource_hints: rh_aeo0 } : {}) };
       }
       const errMsg = ar.error ?? 'AEO apply failed';
       try { await deps.markFailed(item.id, errMsg); } catch { /* non-fatal */ }
@@ -632,7 +668,8 @@ export async function applyFix(
         field:       ar.action ?? item.issue_type,
         duration_ms: Date.now() - start,
       });
-      return { action_id: item.id, success: true, fix_type: item.issue_type };
+      const rh_aeo = await runResourceHints(deps, item, creds);
+      return { action_id: item.id, success: true, fix_type: item.issue_type, ...(rh_aeo ? { resource_hints: rh_aeo } : {}) };
     }
     const errMsg = ar.error ?? 'AEO apply failed';
     try { await deps.markFailed(item.id, errMsg); } catch { /* non-fatal */ }
@@ -663,7 +700,8 @@ export async function applyFix(
           field:       'timestamp',
           duration_ms: Date.now() - start,
         });
-        return { action_id: item.id, success: true, fix_type: item.issue_type, timestamp_fixes: tr.timestamp_fixes };
+        const rh_ts = await runResourceHints(deps, item, creds);
+        return { action_id: item.id, success: true, fix_type: item.issue_type, timestamp_fixes: tr.timestamp_fixes, ...(rh_ts ? { resource_hints: rh_ts } : {}) };
       }
       const errMsg = tr.error ?? 'Timestamp apply failed';
       try { await deps.markFailed(item.id, errMsg); } catch { /* non-fatal */ }
@@ -730,11 +768,13 @@ export async function applyFix(
       field:       fixType,
       duration_ms: duration,
     });
+    const rh_shopify = await runResourceHints(deps, item, creds);
     return {
       action_id:    item.id,
       success:      true,
       fix_type:     fixType,
       before_value: result.before_value,
+      ...(rh_shopify ? { resource_hints: rh_shopify } : {}),
     };
   }
 

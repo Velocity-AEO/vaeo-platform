@@ -566,3 +566,60 @@ describe('applyFix — timestamp intercept', () => {
     }
   });
 });
+
+describe('applyFix — resource hints wiring', () => {
+  it('calls resourceHintsApply after a successful Shopify fix', async () => {
+    let rhCalled = false;
+    const deps = makeDeps({
+      resourceHintsApply: async () => { rhCalled = true; return { injected_count: 2, domains: ['www.googletagmanager.com', 'cdn.shopify.com'] }; },
+    });
+    const result = await applyFix(makeItem(), deps);
+    assert.equal(result.success, true);
+    assert.ok(rhCalled);
+  });
+
+  it('attaches resource_hints to ApplyResult when hints injected', async () => {
+    const deps = makeDeps({
+      resourceHintsApply: async () => ({ injected_count: 1, domains: ['cdn.shopify.com'] }),
+    });
+    const result = await applyFix(makeItem(), deps);
+    assert.ok(result.resource_hints);
+    assert.equal(result.resource_hints!.injected_count, 1);
+    assert.ok(result.resource_hints!.domains.includes('cdn.shopify.com'));
+  });
+
+  it('does NOT attach resource_hints when injected_count is 0', async () => {
+    const deps = makeDeps({
+      resourceHintsApply: async () => ({ injected_count: 0, domains: [] }),
+    });
+    const result = await applyFix(makeItem(), deps);
+    assert.equal(result.resource_hints, undefined);
+  });
+
+  it('does not call resourceHintsApply when dep is absent', async () => {
+    const deps = makeDeps();
+    const result = await applyFix(makeItem(), deps);
+    assert.equal(result.resource_hints, undefined);
+  });
+
+  it('resourceHintsApply failure is non-fatal — fix still succeeds', async () => {
+    const deps = makeDeps({
+      resourceHintsApply: async () => { throw new Error('network error'); },
+    });
+    const result = await applyFix(makeItem(), deps);
+    assert.equal(result.success, true);
+    assert.equal(result.resource_hints, undefined);
+  });
+
+  it('calls resourceHintsApply after a successful schema fix', async () => {
+    let rhCalled = false;
+    const deps = makeDeps({
+      schemaApply: async () => ({ success: true }),
+      resourceHintsApply: async () => { rhCalled = true; return { injected_count: 1, domains: ['cdn.shopify.com'] }; },
+    });
+    const item = makeItem({ issue_type: 'schema_missing' });
+    const result = await applyFix(item, deps);
+    assert.equal(result.success, true);
+    assert.ok(rhCalled);
+  });
+});
