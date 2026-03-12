@@ -93,6 +93,14 @@ export interface ApplyDeps {
     item:  ApprovedItem,
     creds: { access_token: string; store_url: string },
   ) => Promise<{ success: boolean; action?: string; error?: string }>;
+  /**
+   * Optional — AEO fix pipeline (SPEAKABLE_MISSING, FAQ_OPPORTUNITY, etc.).
+   * Generates and injects AEO schema into the Shopify theme.
+   */
+  aeoApply?: (
+    item:  ApprovedItem,
+    creds: { access_token: string; store_url: string },
+  ) => Promise<{ success: boolean; action?: string; schema_type?: string; error?: string }>;
 }
 
 // ── Issue type → Shopify fix type mapping ───────────────────────────────────
@@ -102,13 +110,27 @@ type ShopifyFixType = ShopifyFixRequest['fix_type'];
 /** Performance issue types that bypass the Shopify adapter. */
 const PERFORMANCE_ISSUE_TYPES = new Set(['DEFER_SCRIPT', 'LAZY_IMAGE', 'FONT_DISPLAY']);
 
+/** AEO issue types that bypass the Shopify adapter. */
+const AEO_ISSUE_TYPES = new Set([
+  'SPEAKABLE_MISSING',
+  'AEO_SCHEMA_INCOMPLETE',
+  'FAQ_OPPORTUNITY',
+  'ANSWER_BLOCK_OPPORTUNITY',
+]);
+
 function isPerformanceIssue(issueType: string): boolean {
   return PERFORMANCE_ISSUE_TYPES.has(issueType);
 }
 
-function mapIssueToFixType(issueType: string): ShopifyFixType | 'performance' | null {
+function isAEOIssue(issueType: string): boolean {
+  return AEO_ISSUE_TYPES.has(issueType);
+}
+
+function mapIssueToFixType(issueType: string): ShopifyFixType | 'performance' | 'aeo' | null {
   // Performance issues are handled by a separate pipeline
   if (isPerformanceIssue(issueType)) return 'performance';
+  // AEO issues are handled by the AEO pipeline
+  if (isAEOIssue(issueType)) return 'aeo';
   const lower = issueType.toLowerCase();
   if (lower.includes('title'))     return 'meta_title';
   if (lower.includes('meta') || lower.includes('desc')) return 'meta_description';
@@ -531,6 +553,62 @@ export async function applyFix(
       return { action_id: item.id, success: true, fix_type: item.issue_type };
     }
     const errMsg = pr.error ?? 'Performance apply failed';
+    try { await deps.markFailed(item.id, errMsg); } catch { /* non-fatal */ }
+    deps.writeLog({
+      action_id:   item.id,
+      stage:       'apply:failed',
+      status:      'failed',
+      url:         item.url,
+      error:       errMsg,
+      duration_ms: Date.now() - start,
+    });
+    return { action_id: item.id, success: false, fix_type: item.issue_type, error: errMsg };
+  }
+
+  // ── AEO intercept ────────────────────────────────────────────────────
+  if (fixType === 'aeo') {
+    if (!deps.aeoApply) {
+      // No AEO pipeline configured — use built-in applyAEOFix
+      const { applyAEOFix } = await import('./aeo_apply.js');
+      const ar = await applyAEOFix(item, creds);
+      if (ar.success) {
+        try { await deps.markDeployed(item.id); } catch { /* non-fatal */ }
+        deps.writeLog({
+          action_id:   item.id,
+          stage:       'apply:deployed',
+          status:      'ok',
+          url:         item.url,
+          field:       ar.action ?? item.issue_type,
+          duration_ms: Date.now() - start,
+        });
+        return { action_id: item.id, success: true, fix_type: item.issue_type };
+      }
+      const errMsg = ar.error ?? 'AEO apply failed';
+      try { await deps.markFailed(item.id, errMsg); } catch { /* non-fatal */ }
+      deps.writeLog({
+        action_id:   item.id,
+        stage:       'apply:failed',
+        status:      'failed',
+        url:         item.url,
+        error:       errMsg,
+        duration_ms: Date.now() - start,
+      });
+      return { action_id: item.id, success: false, fix_type: item.issue_type, error: errMsg };
+    }
+    const ar = await deps.aeoApply(item, creds);
+    if (ar.success) {
+      try { await deps.markDeployed(item.id); } catch { /* non-fatal */ }
+      deps.writeLog({
+        action_id:   item.id,
+        stage:       'apply:deployed',
+        status:      'ok',
+        url:         item.url,
+        field:       ar.action ?? item.issue_type,
+        duration_ms: Date.now() - start,
+      });
+      return { action_id: item.id, success: true, fix_type: item.issue_type };
+    }
+    const errMsg = ar.error ?? 'AEO apply failed';
     try { await deps.markFailed(item.id, errMsg); } catch { /* non-fatal */ }
     deps.writeLog({
       action_id:   item.id,
