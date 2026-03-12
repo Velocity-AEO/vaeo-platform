@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { getAllSites } from '@/lib/queries';
+import GSCButton from './GSCButton';
 
 function HealthBadge({ score }: { score: { total: number; grade: string } }) {
   const color =
@@ -30,12 +31,13 @@ export default async function SitesPage() {
               <th className="px-5 py-3 font-medium text-right">Issues</th>
               <th className="px-5 py-3 font-medium">Last run</th>
               <th className="px-5 py-3 font-medium">Added</th>
+              <th className="px-5 py-3 font-medium">GSC</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {sites.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-5 py-8 text-center text-slate-400 text-xs">
+                <td colSpan={7} className="px-5 py-8 text-center text-slate-400 text-xs">
                   No sites registered.
                 </td>
               </tr>
@@ -69,6 +71,9 @@ export default async function SitesPage() {
                 </td>
                 <td className="px-5 py-3 text-xs text-slate-400">
                   {new Date(s.created_at).toLocaleDateString()}
+                </td>
+                <td className="px-5 py-3">
+                  <GSCButton siteId={s.site_id} />
                 </td>
               </tr>
             ))}
