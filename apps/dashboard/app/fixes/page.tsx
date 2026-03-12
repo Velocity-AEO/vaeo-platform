@@ -33,9 +33,9 @@ function SiteHeader() {
       : 'text-orange-500';
 
   return (
-    <div className="flex items-center justify-between mb-8">
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-8">
       <div>
-        <h1 className="text-xl font-semibold text-slate-900">{SITE}</h1>
+        <h1 className="text-lg md:text-xl font-semibold text-slate-900 truncate max-w-xs md:max-w-none">{SITE}</h1>
         <p className="text-xs text-slate-400 mt-0.5">Shopify · Operator Demo</p>
       </div>
       <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-4 py-2.5">
@@ -230,7 +230,7 @@ function FixCard() {
   const showOverlay = state === 'applied' || state === 'rolling-back' || state === 'rolled-back';
 
   return (
-    <div className="relative bg-white border border-slate-200 rounded-2xl p-6 shadow-sm max-w-2xl">
+    <div className="relative bg-white border border-slate-200 rounded-2xl p-4 sm:p-6 shadow-sm w-full max-w-2xl">
       {state === 'applied' || state === 'rolling-back' ? (
         <AppliedOverlay onRollback={handleRollback} rollbackState={rollbackState} />
       ) : state === 'rolled-back' ? (
@@ -238,7 +238,7 @@ function FixCard() {
       ) : null}
 
       {/* Card header */}
-      <div className="flex items-start justify-between gap-4 mb-5">
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 mb-5">
         <div>
           <div className="flex items-center gap-2 mb-1">
             <span className="text-[10px] font-bold uppercase tracking-widest text-orange-600 bg-orange-50 border border-orange-200 px-2 py-0.5 rounded">
@@ -275,7 +275,7 @@ function FixCard() {
           <button
             onClick={handleApply}
             disabled={state === 'applying'}
-            className="inline-flex items-center gap-2 bg-slate-900 hover:bg-slate-700 disabled:opacity-60 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+            className="inline-flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-700 disabled:opacity-60 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors h-11 w-full sm:w-auto"
           >
             {state === 'applying' ? (
               <>

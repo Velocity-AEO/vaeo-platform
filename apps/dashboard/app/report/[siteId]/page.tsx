@@ -84,7 +84,7 @@ function LoadingSkeleton() {
     <div className="animate-pulse space-y-4">
       <div className="h-8 bg-slate-200 rounded w-1/3" />
       <div className="h-4 bg-slate-200 rounded w-1/4" />
-      <div className="grid grid-cols-3 gap-4 mt-6">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-6">
         <div className="h-32 bg-slate-200 rounded-xl" />
         <div className="h-32 bg-slate-200 rounded-xl" />
         <div className="h-32 bg-slate-200 rounded-xl" />
@@ -131,7 +131,7 @@ export default function ReportPage() {
 
   if (loading) {
     return (
-      <div className="max-w-5xl mx-auto">
+      <div className="px-4 md:px-6 w-full max-w-5xl mx-auto">
         <LoadingSkeleton />
       </div>
     );
@@ -139,7 +139,7 @@ export default function ReportPage() {
 
   if (error) {
     return (
-      <div className="max-w-5xl mx-auto">
+      <div className="px-4 md:px-6 w-full max-w-5xl mx-auto">
         <div className="bg-red-50 border border-red-200 rounded-xl p-6 text-red-700 text-sm">
           Failed to load report: {error}
         </div>
@@ -150,30 +150,30 @@ export default function ReportPage() {
   if (!report) return null;
 
   return (
-    <div className="max-w-5xl mx-auto">
+    <div className="px-4 md:px-6 w-full max-w-5xl mx-auto">
       {/* Header */}
-      <div className="flex items-start justify-between mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 mb-6">
         <div>
-          <h1 className="text-xl font-semibold">{report.site_url}</h1>
+          <h1 className="text-lg md:text-xl font-semibold truncate max-w-xs md:max-w-none">{report.site_url}</h1>
           <p className="text-xs text-slate-400 mt-1">
             Last updated: {new Date(report.generated_at).toLocaleString()}
           </p>
         </div>
         <a
           href={`/api/report/${siteId}/export`}
-          className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
+          className="inline-flex items-center justify-center h-11 sm:h-auto px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors w-full sm:w-auto"
         >
           Export Report
         </a>
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 border-b border-slate-200 mb-6">
+      <div className="flex gap-1 border-b border-slate-200 mb-6 overflow-x-auto">
         {TABS.map((tab) => (
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
-            className={`px-4 py-2 text-sm font-medium transition-colors rounded-t-lg ${
+            className={`px-3 sm:px-4 py-2 text-sm font-medium transition-colors rounded-t-lg whitespace-nowrap h-11 sm:h-auto ${
               activeTab === tab.key
                 ? 'bg-white border border-b-white border-slate-200 text-blue-600 -mb-px'
                 : 'text-slate-500 hover:text-slate-700'
