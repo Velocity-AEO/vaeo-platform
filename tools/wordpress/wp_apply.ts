@@ -15,15 +15,19 @@
 
 import type { WPCredentials, ThemeFile } from './wp_adapter.js';
 import type { WPIssue } from './wp_detect.js';
+import { detectTimestampSignals } from '../detect/timestamp_detect.js';
+import { planTimestampFixes, type TimestampFix } from '../optimize/timestamp_plan.js';
+import { applyTimestampFixes } from '../apply/timestamp_apply.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export interface WPApplyResult {
-  issue_type: string;
-  url:        string;
-  success:    boolean;
-  action:     string;
-  error?:     string;
+  issue_type:       string;
+  url:              string;
+  success:          boolean;
+  action:           string;
+  error?:           string;
+  timestamp_fixes?: TimestampFix[];
 }
 
 export interface WPApplyDeps {
@@ -331,16 +335,56 @@ export async function applyWPFix(
 
 /**
  * Apply all WordPress fixes sequentially.
- * Returns array of results — one per issue.
+ * After applying, runs timestamp detection and injects
+ * timestamps if needed. Non-fatal — timestamp failure
+ * does not block main fixes.
  */
 export async function applyAllWPFixes(
   issues: WPIssue[],
   credentials: WPCredentials,
   _testDeps?: Partial<WPApplyDeps>,
 ): Promise<WPApplyResult[]> {
+  const deps = { ...defaultDeps(), ..._testDeps };
   const results: WPApplyResult[] = [];
   for (const issue of issues) {
     results.push(await applyWPFix(issue, credentials, _testDeps));
   }
+
+  // ── Timestamp injection pass ──────────────────────────────────────────────
+  // For each unique URL, fetch updated HTML and inject timestamps if needed.
+  try {
+    const urls = [...new Set(issues.map((i) => i.url))];
+    for (const url of urls) {
+      try {
+        const postId = await deps.lookupPostId(credentials, url);
+        if (!postId) continue;
+
+        const html = await deps.getPostContent(credentials, postId);
+        if (!html) continue;
+
+        const signals = detectTimestampSignals(html);
+        if (!signals.needs_injection) continue;
+
+        const plan = planTimestampFixes('wp', url, html, signals);
+        if (plan.fixes.length === 0) continue;
+
+        const tsResult = applyTimestampFixes(html, plan);
+        if (tsResult.applied.length > 0 && tsResult.html !== html) {
+          await deps.updatePostContent(credentials, postId, tsResult.html);
+
+          // Attach timestamp fixes to the last result for this URL
+          const lastResult = [...results].reverse().find((r) => r.url === url);
+          if (lastResult) {
+            lastResult.timestamp_fixes = tsResult.applied;
+          }
+        }
+      } catch {
+        // Non-fatal — timestamp failure must not block main fixes
+      }
+    }
+  } catch {
+    // Non-fatal
+  }
+
   return results;
 }
