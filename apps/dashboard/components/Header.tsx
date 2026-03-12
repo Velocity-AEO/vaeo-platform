@@ -23,6 +23,7 @@ const NAV = [
   { href: '/native',        label: 'Native'          },
   { href: '/heavyweight/case-study/demo', label: 'Case Study'  },
   { href: '/heavyweight',                label: 'Sandbox'     },
+  { href: '/live-run',                  label: 'Live Run'    },
   { href: '/onboarding',    label: 'Connect Site'   },
   { href: '/billing',    label: 'Billing'        },
   { href: '/debug',      label: 'Debug'          },
