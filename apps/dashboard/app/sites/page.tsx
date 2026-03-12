@@ -37,12 +37,13 @@ export default async function SitesPage() {
               <th className="px-5 py-3 font-medium">Apps</th>
               <th className="px-5 py-3 font-medium">GSC</th>
               <th className="px-5 py-3 font-medium">Debug</th>
+              <th className="px-5 py-3 font-medium">Client View</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {sites.length === 0 && (
               <tr>
-                <td colSpan={12} className="px-5 py-8 text-center text-slate-400 text-xs">
+                <td colSpan={13} className="px-5 py-8 text-center text-slate-400 text-xs">
                   No sites registered.
                 </td>
               </tr>
@@ -103,6 +104,11 @@ export default async function SitesPage() {
                 <td className="px-5 py-3">
                   <Link href={`/debug/${s.site_id}`} className="text-blue-600 hover:underline text-xs font-medium">
                     Debug
+                  </Link>
+                </td>
+                <td className="px-5 py-3">
+                  <Link href={`/client/${s.site_id}`} className="text-purple-600 hover:underline text-xs font-medium">
+                    Client View
                   </Link>
                 </td>
               </tr>
