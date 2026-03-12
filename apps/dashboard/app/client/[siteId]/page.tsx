@@ -85,6 +85,7 @@ export default function ClientDashboard() {
   const [history,      setHistory]      = useState<HistoryPoint[]>([]);
   const [loading,      setLoading]      = useState(true);
   const [error,        setError]        = useState<string | null>(null);
+  const [qaSummary,    setQaSummary]    = useState<{ total_fixes_with_qa: number; passed: number; failed: number; pass_rate: number; most_failed_viewport: string | null } | null>(null);
 
   // Auth guard — check client access on mount
   useEffect(() => {
@@ -139,6 +140,11 @@ export default function ClientDashboard() {
         }));
         setHistory(points);
       }
+      // Fetch QA summary (non-blocking)
+      fetch(`/api/client/sites/${siteId}/qa-summary`)
+        .then(r => r.ok ? r.json() : null)
+        .then(d => { if (d) setQaSummary(d); })
+        .catch(() => {});
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load');
     } finally {
@@ -246,6 +252,31 @@ export default function ClientDashboard() {
           sub={`${rankings.keywords_improved} improved this month`}
         />
       </div>
+
+      {/* Fix Verification summary */}
+      <section className="bg-white border border-slate-200 rounded-xl p-4">
+        <h2 className="text-sm font-semibold text-slate-700 mb-2">Fix Verification</h2>
+        {qaSummary && qaSummary.total_fixes_with_qa > 0 ? (
+          <div className="flex flex-col sm:flex-row gap-4 text-sm">
+            <div>
+              <span className="text-slate-500">Pass rate: </span>
+              <span className="font-bold text-slate-800">{qaSummary.pass_rate}%</span>
+            </div>
+            <div>
+              <span className="text-slate-500">Verified: </span>
+              <span className="font-medium text-slate-700">{qaSummary.total_fixes_with_qa} fixes</span>
+            </div>
+            {qaSummary.most_failed_viewport && (
+              <div>
+                <span className="text-slate-500">Most issues: </span>
+                <span className="font-medium text-red-600">{qaSummary.most_failed_viewport}</span>
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className="text-xs text-slate-400">No fixes verified yet</p>
+        )}
+      </section>
 
       {/* Rankings table */}
       <section>
