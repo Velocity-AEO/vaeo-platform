@@ -3,15 +3,19 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import ViewportScreenshotStrip from '../../../../components/ViewportScreenshotStrip';
+import RollbackButton from '../../../../components/RollbackButton';
+import RollbackHistory from '../../../../components/RollbackHistory';
 import { getExpandedFixId, isFixExpanded } from '../../../../lib/fix_expand_logic';
 
 interface Fix {
-  fix_id: string;
-  label: string;
-  url: string;
-  issue: string;
-  status: string;
-  confidence: number;
+  fix_id:         string;
+  label:          string;
+  url:            string;
+  issue:          string;
+  status:         string;
+  confidence:     number;
+  applied_at?:    string;
+  original_value?: string | null;
 }
 
 export default function ClientFixesPage() {
@@ -115,6 +119,24 @@ export default function ClientFixesPage() {
               {fix.confidence > 0 && (
                 <span className="shrink-0 text-xs text-slate-400">{fix.confidence}%</span>
               )}
+
+              {fix.status === 'applied' && fix.applied_at && (
+                <div onClick={(e) => e.stopPropagation()}>
+                  <RollbackButton
+                    fix_id={fix.fix_id}
+                    site_id={siteId}
+                    applied_at={fix.applied_at}
+                    original_value={fix.original_value ?? null}
+                    on_rollback_complete={() => {
+                      setFixes((prev) =>
+                        prev.map((f) =>
+                          f.fix_id === fix.fix_id ? { ...f, status: 'rolled_back' } : f,
+                        ),
+                      );
+                    }}
+                  />
+                </div>
+              )}
             </button>
 
             {/* Expanded section */}
@@ -127,6 +149,13 @@ export default function ClientFixesPage() {
           </div>
         );
       })}
+
+
+      {/* Rollback History */}
+      <div className="mt-8">
+        <h2 className="text-sm font-semibold text-slate-700 mb-3">Rollback History</h2>
+        <RollbackHistory site_id={siteId} />
+      </div>
     </div>
   );
 }
