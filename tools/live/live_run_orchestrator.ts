@@ -55,6 +55,12 @@ export interface SystemHealthReport {
   checked_at:     string;
 }
 
+export interface WPSandboxCounts {
+  wp_sandbox_passes:   number;
+  wp_sandbox_failures: number;
+  wp_sandbox_skipped:  number;
+}
+
 export interface LiveRunResult {
   state:                LiveRunState;
   crawl:                CrawlResult;
@@ -63,6 +69,7 @@ export interface LiveRunResult {
   health:               SystemHealthReport | null;
   feedback_summary?:    FeedbackSummary;
   data_source_summary?: DataSourceSummary;
+  wp_sandbox?:          WPSandboxCounts;
 }
 
 export interface OrchestratorDeps {
@@ -95,6 +102,12 @@ export interface OrchestratorDeps {
   dispatchNotification?: typeof dispatchFixNotification;
   /** Billing enforcement deps for testing */
   billingDeps?: BillingEnforcementDeps;
+  /** WP sandbox config loader — returns config or null */
+  loadWPSandboxConfig?: (site_id: string) => Promise<{ site_id: string } | null>;
+  /** WP sandbox runner — returns { passed, failure_reasons } */
+  runWPSandbox?: (fix: AggregatedIssue, config: { site_id: string }) => Promise<{ passed: boolean; failure_reasons: string[] }>;
+  /** Logger for warnings */
+  logWarning?: (message: string) => void;
 }
 
 // ── Orchestrator ─────────────────────────────────────────────────────────────
@@ -199,6 +212,44 @@ export async function runLiveProduction(
     const autoFixable = issues.issues.filter((i) => i.auto_fixable);
     const executeBatch = deps?.executeFixBatch ?? defaultExecuteFixBatch;
     fixes = await executeBatch(autoFixable, target.site_id, state.run_id, target.dry_run);
+
+    // WP sandbox routing
+    const wpSandbox: WPSandboxCounts = { wp_sandbox_passes: 0, wp_sandbox_failures: 0, wp_sandbox_skipped: 0 };
+    if (target.platform === 'wordpress') {
+      let wpConfig: { site_id: string } | null = null;
+      try {
+        if (deps?.loadWPSandboxConfig) {
+          wpConfig = await deps.loadWPSandboxConfig(target.site_id);
+        }
+      } catch {
+        // fail open
+      }
+
+      if (wpConfig && deps?.runWPSandbox) {
+        for (const fix of autoFixable) {
+          try {
+            const result = await deps.runWPSandbox(fix, wpConfig);
+            if (result.passed) {
+              wpSandbox.wp_sandbox_passes++;
+            } else {
+              wpSandbox.wp_sandbox_failures++;
+              fixes = {
+                ...fixes,
+                failure_count: fixes.failure_count + 1,
+                success_count: Math.max(0, fixes.success_count - 1),
+              };
+            }
+          } catch {
+            wpSandbox.wp_sandbox_skipped++;
+          }
+        }
+      } else {
+        wpSandbox.wp_sandbox_skipped = autoFixable.length;
+        const warn = deps?.logWarning ?? ((msg: string) => process.stderr.write(`[orchestrator] ${msg}\n`));
+        warn(`WP sandbox config not loaded for site ${target.site_id} — fix applied without sandbox`);
+      }
+    }
+
     state = {
       ...state,
       fixes_applied:    fixes.success_count,
@@ -275,7 +326,7 @@ export async function runLiveProduction(
       }
     }
 
-    return { state, crawl, issues, fixes, health, feedback_summary, data_source_summary };
+    return { state, crawl, issues, fixes, health, feedback_summary, data_source_summary, wp_sandbox: wpSandbox };
   } catch (err) {
     state = transitionPhase(
       state,

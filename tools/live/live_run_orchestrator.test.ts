@@ -368,3 +368,96 @@ describe('runLiveProduction — notifications', () => {
     assert.equal(result.state.phase, 'failed');
   });
 });
+
+// ── WP sandbox wiring ───────────────────────────────────────────────────────
+
+describe('runLiveProduction — WP sandbox', () => {
+  function wpTarget(overrides?: Partial<import('./live_run_config.js').LiveRunTarget>) {
+    return { ...defaultTarget('site_1', 'x.com', 'wordpress'), ...overrides };
+  }
+
+  it('routes WP fixes through sandbox when config loaded', async () => {
+    const sandboxed: string[] = [];
+    const result = await runLiveProduction(wpTarget(), mockDeps({
+      loadWPSandboxConfig: async () => ({ site_id: 'site_1' }),
+      runWPSandbox: async (fix) => { sandboxed.push(fix.fix_type); return { passed: true, failure_reasons: [] }; },
+      logWarning: () => {},
+    }));
+    assert.equal(result.state.phase, 'complete');
+    assert.ok(sandboxed.length > 0);
+    assert.equal(result.wp_sandbox!.wp_sandbox_passes, sandboxed.length);
+  });
+
+  it('sandbox failure marks fix as failed', async () => {
+    const result = await runLiveProduction(wpTarget(), mockDeps({
+      loadWPSandboxConfig: async () => ({ site_id: 'site_1' }),
+      runWPSandbox: async () => ({ passed: false, failure_reasons: ['delta_verify_failed'] }),
+      logWarning: () => {},
+    }));
+    assert.equal(result.state.phase, 'complete');
+    assert.ok(result.wp_sandbox!.wp_sandbox_failures > 0);
+  });
+
+  it('sandbox pass marks fix as applied', async () => {
+    const result = await runLiveProduction(wpTarget(), mockDeps({
+      loadWPSandboxConfig: async () => ({ site_id: 'site_1' }),
+      runWPSandbox: async () => ({ passed: true, failure_reasons: [] }),
+      logWarning: () => {},
+    }));
+    assert.equal(result.wp_sandbox!.wp_sandbox_passes, 2);
+    assert.equal(result.wp_sandbox!.wp_sandbox_failures, 0);
+  });
+
+  it('sandbox skipped when config not loaded', async () => {
+    const warnings: string[] = [];
+    const result = await runLiveProduction(wpTarget(), mockDeps({
+      loadWPSandboxConfig: async () => null,
+      logWarning: (msg) => { warnings.push(msg); },
+    }));
+    assert.equal(result.wp_sandbox!.wp_sandbox_skipped, 2);
+  });
+
+  it('warning logged when sandbox skipped', async () => {
+    const warnings: string[] = [];
+    const result = await runLiveProduction(wpTarget(), mockDeps({
+      logWarning: (msg) => { warnings.push(msg); },
+    }));
+    assert.equal(result.state.phase, 'complete');
+    assert.ok(warnings.some(w => w.includes('WP sandbox config not loaded')));
+  });
+
+  it('live run summary includes sandbox counts', async () => {
+    const result = await runLiveProduction(wpTarget(), mockDeps({
+      loadWPSandboxConfig: async () => ({ site_id: 'site_1' }),
+      runWPSandbox: async () => ({ passed: true, failure_reasons: [] }),
+      logWarning: () => {},
+    }));
+    assert.ok(result.wp_sandbox);
+    assert.equal(typeof result.wp_sandbox!.wp_sandbox_passes, 'number');
+    assert.equal(typeof result.wp_sandbox!.wp_sandbox_failures, 'number');
+    assert.equal(typeof result.wp_sandbox!.wp_sandbox_skipped, 'number');
+  });
+
+  it('sandbox counts correct for mixed results', async () => {
+    let callCount = 0;
+    const result = await runLiveProduction(wpTarget(), mockDeps({
+      loadWPSandboxConfig: async () => ({ site_id: 'site_1' }),
+      runWPSandbox: async () => {
+        callCount++;
+        if (callCount === 1) return { passed: true, failure_reasons: [] };
+        return { passed: false, failure_reasons: ['regression'] };
+      },
+      logWarning: () => {},
+    }));
+    assert.equal(result.wp_sandbox!.wp_sandbox_passes, 1);
+    assert.equal(result.wp_sandbox!.wp_sandbox_failures, 1);
+  });
+
+  it('never throws when sandbox throws', async () => {
+    await assert.doesNotReject(() => runLiveProduction(wpTarget(), mockDeps({
+      loadWPSandboxConfig: async () => ({ site_id: 'site_1' }),
+      runWPSandbox: async () => { throw new Error('sandbox boom'); },
+      logWarning: () => {},
+    })));
+  });
+});
