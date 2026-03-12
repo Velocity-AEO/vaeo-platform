@@ -15,6 +15,7 @@ const NAV = [
   { href: '/queue',      label: 'Command Center' },
   { href: '/report',     label: 'Reports'        },
   { href: '/security',   label: 'Security'       },
+  { href: '/vehicle',    label: 'Vehicle Schema' },
   { href: '/onboarding', label: 'Connect Site'   },
   { href: '/billing',    label: 'Billing'        },
 ];
