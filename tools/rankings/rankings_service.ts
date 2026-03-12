@@ -8,6 +8,7 @@
 
 import { simulateRankings } from './ranking_simulator.js';
 import { createGSCClient } from '../gsc/gsc_client.js';
+import { fetchLiveRankings, type LiveRankingsResult } from '../gsc/gsc_live_rankings.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -36,11 +37,39 @@ type FetchFn = typeof globalThis.fetch;
 
 export async function fetchRankings(
   config: RankingsServiceConfig,
-  deps?: { fetchFn?: FetchFn },
+  deps?: { fetchFn?: FetchFn; loadPropertyFn?: Function; getTokenFn?: Function; fetchAnalyticsFn?: Function },
 ): Promise<RankingEntry[]> {
   try {
     const { site_id, domain, gsc_token, use_simulator_fallback } = config ?? {};
     const now = new Date().toISOString();
+
+    // Try live rankings pipeline when property loader is available
+    if (deps?.loadPropertyFn) {
+      try {
+        const result: LiveRankingsResult = await fetchLiveRankings(
+          { site_id, domain, days_back: 28, row_limit: 100 },
+          {
+            loadPropertyFn: deps.loadPropertyFn as any,
+            getTokenFn: deps.getTokenFn as any,
+            fetchAnalyticsFn: deps.fetchAnalyticsFn as any,
+          },
+        );
+        if (!result.error && result.rankings.length > 0) {
+          return result.rankings.map(r => ({
+            keyword:     r.keyword,
+            position:    r.position,
+            clicks:      r.clicks,
+            impressions: r.impressions,
+            url:         r.url,
+            data_source: 'gsc_live' as DataSource,
+            fetched_at:  now,
+          }));
+        }
+        // Fall through to existing logic if live pipeline returned error
+      } catch {
+        // Live pipeline error — fall through
+      }
+    }
 
     if (gsc_token) {
       try {

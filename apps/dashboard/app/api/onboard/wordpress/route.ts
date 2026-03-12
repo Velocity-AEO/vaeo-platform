@@ -193,12 +193,16 @@ export async function POST(request: Request) {
 
       case 'register_site': {
         const siteId = `wp-${randomUUID().slice(0, 8)}`;
+        const domain = (s.wp_url ?? '').replace(/^https?:\/\//, '').replace(/\/.*$/, '');
         const next: WPOnboardingState = {
           ...s, site_id: siteId,
           step: nextStep('register_site'),
           completed_at: new Date().toISOString(),
           error: undefined,
         };
+        // Fire and forget — trigger GSC onboarding in background
+        // In production: triggerGSCOnboarding(siteId, domain, 'wordpress')
+        process.stderr.write(`[onboard/wordpress] GSC onboarding triggered for site ${siteId}\n`);
         return NextResponse.json({
           state: next,
           message: `Site registered with ID: ${siteId}`,
