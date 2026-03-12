@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import HealthTrend from './HealthTrend';
+import FixesPanel from './FixesPanel';
+import PerformancePanel from './PerformancePanel';
 
 type Tab = 'overview' | 'fixes' | 'performance' | 'regressions' | 'aeo' | 'gsc';
 
@@ -181,12 +183,8 @@ export default function ReportPage() {
 
       {/* Tab content */}
       {activeTab === 'overview' && <HealthTrend health={report.health} />}
-      {activeTab === 'fixes' && (
-        <div className="text-sm text-slate-500">Fixes panel — see Fixes tab</div>
-      )}
-      {activeTab === 'performance' && (
-        <div className="text-sm text-slate-500">Performance panel — see Performance tab</div>
-      )}
+      {activeTab === 'fixes' && <FixesPanel fixes={report.fixes} />}
+      {activeTab === 'performance' && <PerformancePanel performance={report.performance} />}
       {activeTab === 'regressions' && (
         <div className="text-sm text-slate-500">Regressions panel — see Regressions tab</div>
       )}
