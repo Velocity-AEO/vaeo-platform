@@ -18,6 +18,9 @@ import type { WPIssue } from './wp_detect.js';
 import { detectTimestampSignals } from '../detect/timestamp_detect.js';
 import { planTimestampFixes, type TimestampFix } from '../optimize/timestamp_plan.js';
 import { applyTimestampFixes } from '../apply/timestamp_apply.js';
+import { detectWpImageIssues } from '../detect/wp_image_detect.js';
+import { planWpImageFixes, type WpImageFix } from '../optimize/wp_image_plan.js';
+import { applyWpImageFixes } from '../apply/wp_image_apply.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -28,6 +31,7 @@ export interface WPApplyResult {
   action:           string;
   error?:           string;
   timestamp_fixes?: TimestampFix[];
+  image_fixes?:     WpImageFix[];
 }
 
 export interface WPApplyDeps {
@@ -380,6 +384,43 @@ export async function applyAllWPFixes(
         }
       } catch {
         // Non-fatal — timestamp failure must not block main fixes
+      }
+    }
+  } catch {
+    // Non-fatal
+  }
+
+  // ── Image optimization pass ──────────────────────────────────────────────
+  // For each unique URL, fetch updated HTML, detect image issues,
+  // plan fixes, and apply automated ones. Non-fatal.
+  try {
+    const imgUrls = [...new Set(issues.map((i) => i.url))];
+    for (const url of imgUrls) {
+      try {
+        const postId = await deps.lookupPostId(credentials, url);
+        if (!postId) continue;
+
+        const html = await deps.getPostContent(credentials, postId);
+        if (!html) continue;
+
+        const signals = detectWpImageIssues(html, url);
+        if (!signals.needs_optimization) continue;
+
+        const plan = planWpImageFixes('wp', url, html, signals);
+        if (plan.automated_count === 0) continue;
+
+        const imgResult = applyWpImageFixes(html, plan);
+        if (imgResult.applied.length > 0 && imgResult.html !== html) {
+          await deps.updatePostContent(credentials, postId, imgResult.html);
+
+          // Attach image fixes to the last result for this URL
+          const lastResult = [...results].reverse().find((r) => r.url === url);
+          if (lastResult) {
+            lastResult.image_fixes = imgResult.applied;
+          }
+        }
+      } catch {
+        // Non-fatal — image failure must not block main fixes
       }
     }
   } catch {
