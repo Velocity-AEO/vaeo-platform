@@ -34,6 +34,7 @@ const NAV = [
   { href: '/client/demo-store/suggestions', label: 'Suggestions' },
   { href: '/client/demo-store/ai-visibility', label: 'AI Visibility' },
   { href: '/client/demo-store/chat',          label: 'Chat'          },
+  { href: '/client/demo-store/copyright',    label: 'Content Protection' },
 ];
 
 export default function Header() {
