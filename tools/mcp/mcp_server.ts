@@ -140,6 +140,20 @@ export async function handleMcpRequest(
   }
 }
 
+// ── Wire all handlers at module load ──────────────────────────────────────────
+
+import { getFixConfidence }      from './handlers/fix_confidence.js';
+import { getSiteLearnings }      from './handlers/site_learnings.js';
+import { getPatternPerformance } from './handlers/pattern_performance.js';
+import { getTopIssues }          from './handlers/top_issues.js';
+import { getHealthTrend }        from './handlers/health_trend.js';
+
+_registerHandler('get_fix_confidence',      (input, db) => getFixConfidence(input as Parameters<typeof getFixConfidence>[0], db));
+_registerHandler('get_site_learnings',      (input, db) => getSiteLearnings(input as Parameters<typeof getSiteLearnings>[0], db));
+_registerHandler('get_pattern_performance', (input, db) => getPatternPerformance(input as Parameters<typeof getPatternPerformance>[0], db));
+_registerHandler('get_top_issues',          (input, db) => getTopIssues(input as Parameters<typeof getTopIssues>[0], db));
+_registerHandler('get_health_trend',        (input, db) => getHealthTrend(input as Parameters<typeof getHealthTrend>[0], db));
+
 // ── getMcpToolList ────────────────────────────────────────────────────────────
 
 export async function getMcpToolList(): Promise<McpTool[]> {
