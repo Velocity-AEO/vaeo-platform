@@ -8,6 +8,7 @@ import {
 import type { SiteStats } from '@/../tools/stats/site_stats';
 import type { RankingSnapshot, RankingEntry } from '@/../tools/rankings/ranking_entry';
 import type { FixHistoryPage, FixHistoryEntry } from '@/../tools/stats/fix_history';
+import POVDisclaimer from '@/components/POVDisclaimer';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -262,25 +263,25 @@ export default function ClientDashboard() {
             </button>
           </div>
         </div>
-        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto">
+          <table className="w-full text-sm md:text-base">
             <thead>
               <tr className="bg-slate-50 text-left text-xs text-slate-500 uppercase tracking-wide">
-                <th className="px-4 py-3 font-medium">Keyword</th>
-                <th className="px-4 py-3 font-medium">URL</th>
+                <th className="px-4 py-3 font-medium max-w-[140px]">Keyword</th>
+                <th className="px-4 py-3 font-medium hidden sm:table-cell">URL</th>
                 <th className="px-4 py-3 font-medium text-center">Pos</th>
                 <th className="px-4 py-3 font-medium text-center">Change</th>
-                <th className="px-4 py-3 font-medium text-right">Impressions</th>
-                <th className="px-4 py-3 font-medium text-right">Clicks</th>
-                <th className="px-4 py-3 font-medium text-right">CTR</th>
+                <th className="px-4 py-3 font-medium text-right hidden sm:table-cell">Impressions</th>
+                <th className="px-4 py-3 font-medium text-right hidden md:table-cell">Clicks</th>
+                <th className="px-4 py-3 font-medium text-right hidden md:table-cell">CTR</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {sortedEntries.map((e: RankingEntry) => (
                 <tr key={e.entry_id} className="hover:bg-slate-50 transition-colors">
-                  <td className="px-4 py-2.5 font-medium text-slate-800">{e.keyword}</td>
-                  <td className="px-4 py-2.5 text-slate-500 text-xs font-mono">
-                    <span title={e.url}>{truncate(e.url, 35)}</span>
+                  <td className="px-4 py-2.5 font-medium text-slate-800 max-w-[140px] truncate">{e.keyword}</td>
+                  <td className="px-4 py-2.5 text-slate-500 text-xs font-mono hidden sm:table-cell">
+                    <span className="truncate max-w-xs inline-block" title={e.url}>{truncate(e.url, 35)}</span>
                   </td>
                   <td className={`px-4 py-2.5 text-center tabular-nums ${positionColor(e.position)}`}>
                     {e.position}
@@ -288,18 +289,20 @@ export default function ClientDashboard() {
                   <td className="px-4 py-2.5 text-center">
                     <div className="flex items-center justify-center gap-1">
                       <TrendArrow trend={e.trend} />
-                      {e.position_delta !== undefined && Math.abs(e.position_delta) >= 1 && (
-                        <DeltaBadge delta={e.position_delta} />
-                      )}
+                      <span className="hidden sm:inline">
+                        {e.position_delta !== undefined && Math.abs(e.position_delta) >= 1 && (
+                          <DeltaBadge delta={e.position_delta} />
+                        )}
+                      </span>
                     </div>
                   </td>
-                  <td className="px-4 py-2.5 text-right tabular-nums text-slate-600">
+                  <td className="px-4 py-2.5 text-right tabular-nums text-slate-600 hidden sm:table-cell">
                     {e.impressions.toLocaleString()}
                   </td>
-                  <td className="px-4 py-2.5 text-right tabular-nums text-slate-600">
+                  <td className="px-4 py-2.5 text-right tabular-nums text-slate-600 hidden md:table-cell">
                     {e.clicks.toLocaleString()}
                   </td>
-                  <td className="px-4 py-2.5 text-right tabular-nums text-slate-500 text-xs">
+                  <td className="px-4 py-2.5 text-right tabular-nums text-slate-500 text-xs hidden md:table-cell">
                     {(e.ctr * 100).toFixed(1)}%
                   </td>
                 </tr>
@@ -386,15 +389,15 @@ export default function ClientDashboard() {
           </div>
         </div>
 
-        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+        <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-slate-50 text-left text-xs text-slate-500 uppercase tracking-wide">
-                <th className="px-4 py-3 font-medium">Date</th>
+                <th className="px-4 py-3 font-medium whitespace-nowrap">Date</th>
                 <th className="px-4 py-3 font-medium">Page</th>
-                <th className="px-4 py-3 font-medium">Fix Type</th>
-                <th className="px-4 py-3 font-medium">Before → After</th>
-                <th className="px-4 py-3 font-medium text-right">Impact</th>
+                <th className="px-4 py-3 font-medium whitespace-nowrap">Fix Type</th>
+                <th className="px-4 py-3 font-medium whitespace-nowrap hidden sm:table-cell">Before → After</th>
+                <th className="px-4 py-3 font-medium text-right whitespace-nowrap">Impact</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -421,7 +424,7 @@ export default function ClientDashboard() {
                       {e.fix_label}
                     </span>
                   </td>
-                  <td className="px-4 py-2.5 text-xs text-slate-600">
+                  <td className="px-4 py-2.5 text-xs text-slate-600 hidden sm:table-cell">
                     <span className="line-through text-slate-400" title={e.value_before}>
                       {truncate(e.value_before, 20)}
                     </span>
@@ -439,15 +442,15 @@ export default function ClientDashboard() {
 
         {/* Pagination */}
         {totalFixPages > 1 && (
-          <div className="flex items-center justify-between mt-3 text-xs text-slate-500">
+          <div className="flex flex-col sm:flex-row items-center justify-between mt-3 gap-2 text-xs text-slate-500">
             <span>
               Showing {fixPage * FIX_PER_PAGE + 1}–{Math.min((fixPage + 1) * FIX_PER_PAGE, filteredFixes.length)} of {filteredFixes.length}
             </span>
-            <div className="flex gap-1">
+            <div className="flex gap-1 w-full sm:w-auto">
               <button
                 disabled={fixPage === 0}
                 onClick={() => setFixPage(p => p - 1)}
-                className="px-2 py-1 rounded border border-slate-200 disabled:opacity-40 hover:bg-slate-50"
+                className="h-11 sm:h-auto px-3 py-1 rounded border border-slate-200 disabled:opacity-40 hover:bg-slate-50 flex-1 sm:flex-none"
               >
                 ← Prev
               </button>
@@ -455,7 +458,7 @@ export default function ClientDashboard() {
                 <button
                   key={i}
                   onClick={() => setFixPage(i)}
-                  className={`px-2 py-1 rounded border ${
+                  className={`h-11 sm:h-auto px-3 py-1 rounded border flex-1 sm:flex-none ${
                     fixPage === i
                       ? 'bg-blue-600 text-white border-blue-600'
                       : 'border-slate-200 hover:bg-slate-50'
@@ -467,7 +470,7 @@ export default function ClientDashboard() {
               <button
                 disabled={fixPage >= totalFixPages - 1}
                 onClick={() => setFixPage(p => p + 1)}
-                className="px-2 py-1 rounded border border-slate-200 disabled:opacity-40 hover:bg-slate-50"
+                className="h-11 sm:h-auto px-3 py-1 rounded border border-slate-200 disabled:opacity-40 hover:bg-slate-50 flex-1 sm:flex-none"
               >
                 Next →
               </button>
