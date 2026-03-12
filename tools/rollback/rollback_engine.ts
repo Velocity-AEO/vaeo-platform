@@ -5,6 +5,9 @@
  * Injectable deps for apply and log. Never throws.
  */
 
+import { buildFixNotification } from '../notifications/fix_notification.js';
+import { dispatchFixNotification, type NotificationDispatchConfig } from '../notifications/notification_dispatcher.js';
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export interface RollbackTarget {
@@ -33,6 +36,8 @@ export interface RollbackDeps {
     value:  string,
   ) => Promise<{ success: boolean; error?: string }>;
   logFn?: (result: RollbackResult, target: RollbackTarget) => Promise<void>;
+  notificationConfig?: NotificationDispatchConfig;
+  dispatchNotification?: typeof dispatchFixNotification;
 }
 
 export interface RollbackLastDeps extends RollbackDeps {
@@ -89,6 +94,19 @@ export async function rollbackFix(
         await deps.logFn(result, target);
       } catch {
         // non-fatal
+      }
+    }
+
+    // Dispatch rollback notification (non-fatal)
+    if (deps?.notificationConfig) {
+      try {
+        const dispatch = deps.dispatchNotification ?? dispatchFixNotification;
+        const payload = buildFixNotification('rollback_applied', target.site_id, target.url, {
+          rollback_fix_id: target.fix_id,
+        });
+        await dispatch(payload, deps.notificationConfig);
+      } catch {
+        // never let notification failure propagate
       }
     }
 

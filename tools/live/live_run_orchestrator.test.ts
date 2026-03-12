@@ -281,3 +281,90 @@ describe('runLiveProduction — digest trigger', () => {
     await assert.doesNotReject(() => runLiveProduction(target(), {}));
   });
 });
+
+// ── Notification wiring ─────────────────────────────────────────────────────
+
+describe('runLiveProduction — notifications', () => {
+  const notifConfig = {
+    site_id: 'site_1',
+    user_email: 'test@test.com',
+    domain: 'x.com',
+    digest_enabled: true,
+    immediate_alerts_enabled: true,
+  };
+
+  it('dispatches live_run_complete notification after live run', async () => {
+    const dispatched: string[] = [];
+    const result = await runLiveProduction(target(), mockDeps({
+      notificationConfig: notifConfig,
+      dispatchNotification: async (payload) => {
+        dispatched.push(payload.event);
+        return { event: payload.event, dispatched: true, method: 'digest' };
+      },
+    }));
+    assert.equal(result.state.phase, 'complete');
+    assert.ok(dispatched.includes('live_run_complete'));
+  });
+
+  it('notification dispatch does not block run when dispatcher throws', async () => {
+    const result = await runLiveProduction(target(), mockDeps({
+      notificationConfig: notifConfig,
+      dispatchNotification: async () => { throw new Error('notif fail'); },
+    }));
+    assert.equal(result.state.phase, 'complete');
+  });
+
+  it('dispatches fix_failed notification when fix failures exist', async () => {
+    const dispatched: string[] = [];
+    const failBatch = (dry_run: boolean): FixBatch => ({
+      batch_id: 'bat_1', run_id: 'run_1', site_id: 'site_1',
+      attempts: [], success_count: 1, failure_count: 1,
+      sandbox_pass_count: 1, deploy_count: dry_run ? 0 : 1,
+      executed_at: new Date().toISOString(), dry_run,
+    });
+    const result = await runLiveProduction(target(), mockDeps({
+      executeFixBatch: async (_issues, _sid, _rid, dry_run) => failBatch(dry_run),
+      notificationConfig: notifConfig,
+      dispatchNotification: async (payload) => {
+        dispatched.push(payload.event);
+        return { event: payload.event, dispatched: true, method: 'immediate' };
+      },
+    }));
+    assert.equal(result.state.phase, 'complete');
+    assert.ok(dispatched.includes('fix_failed'));
+  });
+
+  it('does not dispatch fix_failed when no failures', async () => {
+    const dispatched: string[] = [];
+    const result = await runLiveProduction(target(), mockDeps({
+      notificationConfig: notifConfig,
+      dispatchNotification: async (payload) => {
+        dispatched.push(payload.event);
+        return { event: payload.event, dispatched: true, method: 'digest' };
+      },
+    }));
+    assert.equal(result.state.phase, 'complete');
+    assert.ok(!dispatched.includes('fix_failed'));
+  });
+
+  it('does not dispatch when notificationConfig is absent', async () => {
+    let called = false;
+    const result = await runLiveProduction(target(), mockDeps({
+      dispatchNotification: async () => {
+        called = true;
+        return { event: 'live_run_complete', dispatched: true, method: 'digest' };
+      },
+    }));
+    assert.equal(result.state.phase, 'complete');
+    assert.equal(called, false);
+  });
+
+  it('never throws on notification error with failed run', async () => {
+    const result = await runLiveProduction(target(), mockDeps({
+      discoverPages: async () => { throw new Error('crawl boom'); },
+      notificationConfig: notifConfig,
+      dispatchNotification: async () => { throw new Error('notif boom'); },
+    }));
+    assert.equal(result.state.phase, 'failed');
+  });
+});

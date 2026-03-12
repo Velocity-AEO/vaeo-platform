@@ -5,6 +5,9 @@
  * and QA gating for any fix in the pipeline. Never throws.
  */
 
+import { buildFixNotification } from '../notifications/fix_notification.js';
+import { dispatchFixNotification, type NotificationDispatchConfig } from '../notifications/notification_dispatcher.js';
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface ViewportQARecord {
@@ -45,6 +48,8 @@ export interface ViewportQADeps {
   captureFn?:    (url: string) => Promise<ViewportCapturePair>;
   storeFn?:      (pair: ViewportCapturePair) => Promise<Record<string, string>>;
   saveRecordFn?: (record: ViewportQARecord) => Promise<void>;
+  notificationConfig?: NotificationDispatchConfig;
+  dispatchNotification?: typeof dispatchFixNotification;
 }
 
 // ── Default stubs ─────────────────────────────────────────────────────────────
@@ -133,6 +138,19 @@ export async function runViewportQAForFix(
 
     // Save record
     await saveRecordFn(record);
+
+    // Dispatch qa_failed notification if QA did not pass (non-fatal)
+    if (!passed && deps?.notificationConfig) {
+      try {
+        const dispatch = deps.dispatchNotification ?? dispatchFixNotification;
+        const payload = buildFixNotification('qa_failed', config.site_id, '', {
+          qa_failed_viewports: record.failed_viewports,
+        });
+        await dispatch(payload, deps.notificationConfig);
+      } catch {
+        // never let notification failure propagate
+      }
+    }
 
     return {
       fix_id,

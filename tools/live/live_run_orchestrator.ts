@@ -38,6 +38,14 @@ import {
 } from './data_source_flag.js';
 import { fetchRankings } from '../rankings/rankings_service.js';
 import { scheduleDigest } from '../email/digest_scheduler.js';
+import { buildFixNotification } from '../notifications/fix_notification.js';
+import { dispatchFixNotification, type NotificationDispatchConfig } from '../notifications/notification_dispatcher.js';
+
+import {
+  checkBillingGate,
+  getBillingBlockMessage,
+  type BillingEnforcementDeps,
+} from '../billing/billing_enforcement.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -81,6 +89,12 @@ export interface OrchestratorDeps {
   data_source?: 'gsc_live' | 'simulated';
   /** Override digest scheduling for testing */
   scheduleDigest?: (site_id: string, opts: { trigger: string }) => Promise<void>;
+  /** Notification dispatch config — when set, enables notifications */
+  notificationConfig?: NotificationDispatchConfig;
+  /** Override notification dispatch for testing */
+  dispatchNotification?: typeof dispatchFixNotification;
+  /** Billing enforcement deps for testing */
+  billingDeps?: BillingEnforcementDeps;
 }
 
 // ── Orchestrator ─────────────────────────────────────────────────────────────
@@ -132,6 +146,21 @@ export async function runLiveProduction(
   let health: SystemHealthReport | null = null;
 
   try {
+    // Billing gate check
+    try {
+      const billingResult = await checkBillingGate(
+        target.site_id,
+        target.max_pages,
+        deps?.billingDeps,
+      );
+      if (!billingResult.allowed) {
+        state = transitionPhase(state, 'failed', getBillingBlockMessage(billingResult));
+        return { state, crawl: emptyCrawl, issues: emptyIssues, fixes: emptyFixes, health: null };
+      }
+    } catch {
+      // Fail open — never block on billing infra error
+    }
+
     // Phase 1: Crawling
     state = transitionPhase(state, 'crawling', 'Discovering pages');
     const discover = deps?.discoverPages ?? discoverPages;
@@ -219,6 +248,31 @@ export async function runLiveProduction(
       process.stderr.write(`[orchestrator] digest queued for site ${target.site_id}\n`);
     } catch {
       // non-fatal
+    }
+
+    // Dispatch notifications (non-fatal)
+    if (deps?.notificationConfig) {
+      try {
+        const dispatch = deps.dispatchNotification ?? dispatchFixNotification;
+        const fixSummary = fixes.attempts.slice(0, 5).map((a: any) => a.fix_type ?? a.fix_id ?? 'fix');
+
+        // live_run_complete notification
+        const completePayload = buildFixNotification('live_run_complete', target.site_id, target.domain, {
+          fix_count: fixes.success_count,
+          fix_summary: fixSummary,
+        });
+        await dispatch(completePayload, deps.notificationConfig);
+
+        // fix_failed notification if any failures
+        if (fixes.failure_count > 0) {
+          const failPayload = buildFixNotification('fix_failed', target.site_id, target.domain, {
+            failed_count: fixes.failure_count,
+          });
+          await dispatch(failPayload, deps.notificationConfig);
+        }
+      } catch {
+        // never let notification failure block the run
+      }
     }
 
     return { state, crawl, issues, fixes, health, feedback_summary, data_source_summary };
