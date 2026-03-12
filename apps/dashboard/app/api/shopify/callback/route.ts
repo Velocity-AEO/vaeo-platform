@@ -154,10 +154,20 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  // --- Redirect to sites page with success ---
+  // --- Redirect: new onboarding → wizard, existing → sites page ---
   const origin = req.nextUrl.origin;
-  const redirectUrl = new URL('/sites', origin);
-  redirectUrl.searchParams.set('connected', shopName);
+  let redirectUrl: URL;
+
+  if (!existing) {
+    // Newly registered site → continue onboarding wizard
+    redirectUrl = new URL('/onboarding', origin);
+    redirectUrl.searchParams.set('site_id', siteId);
+    redirectUrl.searchParams.set('step', 'connect_gsc');
+  } else {
+    // Existing site → sites page
+    redirectUrl = new URL('/sites', origin);
+    redirectUrl.searchParams.set('connected', shopName);
+  }
 
   const response = NextResponse.redirect(redirectUrl);
   // Clean up OAuth cookies
