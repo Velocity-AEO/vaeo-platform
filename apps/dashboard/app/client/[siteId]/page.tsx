@@ -9,6 +9,7 @@ import type { SiteStats } from '@/../tools/stats/site_stats';
 import type { RankingSnapshot, RankingEntry } from '@/../tools/rankings/ranking_entry';
 import type { FixHistoryPage, FixHistoryEntry } from '@/../tools/stats/fix_history';
 import POVDisclaimer from '@/components/POVDisclaimer';
+import SimulatedDataBanner from '@/components/SimulatedDataBanner';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -211,6 +212,7 @@ export default function ClientDashboard() {
     <div className="space-y-8 px-4 py-6 md:px-6 w-full max-w-7xl mx-auto">
 
       <POVDisclaimer />
+      <SimulatedDataBanner data_source="simulated" gsc_connected={false} />
 
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
