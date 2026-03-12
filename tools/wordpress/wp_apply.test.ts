@@ -11,6 +11,7 @@ import {
   applyAllWPFixes,
   type WPApplyDeps,
   type WPApplyResult,
+  type WPApplyConflictOptions,
 } from './wp_apply.js';
 import type { WPIssue } from './wp_detect.js';
 import type { WPCredentials } from './wp_adapter.js';
@@ -312,5 +313,175 @@ describe('applyAllWPFixes — resource hints pass', () => {
     const results = await applyAllWPFixes([makeIssue()], creds, deps);
     // Main results still returned despite the error
     assert.ok(results.length > 0);
+  });
+});
+
+// ── Plugin conflict handling ──────────────────────────────────────────────
+
+const YOAST_HTML = `<html><head>
+<!-- This site is optimized with the Yoast SEO plugin -->
+<title>My Shop</title>
+<meta name="description" content="Best shop" />
+<meta property="og:title" content="My Shop" />
+<meta name="twitter:card" content="summary" />
+<script type="application/ld+json">{"@type":"Organization"}</script>
+<link rel="canonical" href="https://example.com/" />
+</head></html>`;
+
+const PARTIAL_YOAST_HTML = `<html><head>
+<!-- This site is optimized with the Yoast SEO plugin -->
+<title>My Shop</title>
+</head></html>`;
+
+describe('applyWPFix — plugin conflict handling', () => {
+  it('skips title when Yoast is covering it', async () => {
+    const issue: WPIssue = {
+      issue_type: 'TITLE_MISSING',
+      url: 'https://example.com/page/',
+      element: '',
+      fix_hint: 'Add title',
+      category: 'metadata',
+    };
+    const opts: WPApplyConflictOptions = {
+      plugin_slugs: ['wordpress-seo'],
+      page_html: YOAST_HTML,
+    };
+    const result = await applyWPFix(issue, creds, mockDeps(), opts);
+    assert.equal(result.action, 'skipped_plugin_conflict');
+    assert.ok(result.skipped_signals?.includes('title_tag'));
+  });
+
+  it('skips schema when Yoast already outputs JSON-LD', async () => {
+    const issue: WPIssue = {
+      issue_type: 'SCHEMA_MISSING',
+      url: 'https://example.com/page/',
+      element: '',
+      fix_hint: 'Add schema',
+      category: 'schema',
+    };
+    const opts: WPApplyConflictOptions = {
+      plugin_slugs: ['wordpress-seo'],
+      page_html: YOAST_HTML,
+    };
+    const result = await applyWPFix(issue, creds, mockDeps(), opts);
+    assert.equal(result.action, 'skipped_plugin_conflict');
+    assert.ok(result.skipped_signals?.includes('json_ld_schema'));
+  });
+
+  it('writes meta description when Yoast is not covering it', async () => {
+    const issue: WPIssue = {
+      issue_type: 'META_DESC_MISSING',
+      url: 'https://example.com/page/',
+      element: '',
+      fix_hint: 'Add meta desc',
+      category: 'metadata',
+    };
+    const opts: WPApplyConflictOptions = {
+      plugin_slugs: ['wordpress-seo'],
+      page_html: PARTIAL_YOAST_HTML,
+    };
+    const result = await applyWPFix(issue, creds, mockDeps(), opts);
+    assert.equal(result.action, 'update_post_meta');
+    assert.equal(result.success, true);
+  });
+
+  it('logs skipped signals in result', async () => {
+    const issue: WPIssue = {
+      issue_type: 'TITLE_MISSING',
+      url: 'https://example.com/page/',
+      element: '',
+      fix_hint: '',
+      category: 'metadata',
+    };
+    const opts: WPApplyConflictOptions = {
+      plugin_slugs: ['wordpress-seo'],
+      page_html: YOAST_HTML,
+    };
+    const result = await applyWPFix(issue, creds, mockDeps(), opts);
+    assert.ok(Array.isArray(result.skipped_signals));
+    assert.ok(result.skipped_signals!.length > 0);
+  });
+
+  it('applies normally when no plugin_slugs provided', async () => {
+    const issue: WPIssue = {
+      issue_type: 'SCHEMA_MISSING',
+      url: 'https://example.com/page/',
+      element: '',
+      fix_hint: 'Add schema',
+      category: 'schema',
+    };
+    const result = await applyWPFix(issue, creds, mockDeps());
+    assert.equal(result.action, 'inject_schema_snippet');
+    assert.equal(result.success, true);
+  });
+
+  it('applies when no SEO plugins detected in slugs', async () => {
+    const issue: WPIssue = {
+      issue_type: 'SCHEMA_MISSING',
+      url: 'https://example.com/page/',
+      element: '',
+      fix_hint: 'Add schema',
+      category: 'schema',
+    };
+    const opts: WPApplyConflictOptions = {
+      plugin_slugs: ['woocommerce', 'akismet'],
+      page_html: '<html><head></head></html>',
+    };
+    const result = await applyWPFix(issue, creds, mockDeps(), opts);
+    assert.equal(result.action, 'inject_schema_snippet');
+    assert.equal(result.success, true);
+  });
+});
+
+// ── Cache bust after apply ──────────────────────────────────────────────────
+
+describe('applyWPFix — cache bust', () => {
+  it('calls bustCacheAfterFix after successful apply', async () => {
+    let bustCalled = false;
+    const issue: WPIssue = {
+      issue_type: 'SCHEMA_MISSING',
+      url: 'https://example.com/page/',
+      element: '',
+      fix_hint: 'Add schema',
+      category: 'schema',
+    };
+    const opts: WPApplyConflictOptions = {
+      cache_bust_config: {
+        site_id: 's1',
+        wp_url: 'https://example.com',
+        username: 'admin',
+        app_password: 'xxxx',
+        cache_plugins: ['wp_rocket'],
+      },
+      cache_bust_deps: {
+        fetchFn: async () => { bustCalled = true; return { ok: true, status: 200 }; },
+      },
+    };
+    await applyWPFix(issue, creds, mockDeps(), opts);
+    assert.equal(bustCalled, true);
+  });
+
+  it('never throws when cache bust fails', async () => {
+    const issue: WPIssue = {
+      issue_type: 'SCHEMA_MISSING',
+      url: 'https://example.com/page/',
+      element: '',
+      fix_hint: 'Add schema',
+      category: 'schema',
+    };
+    const opts: WPApplyConflictOptions = {
+      cache_bust_config: {
+        site_id: 's1',
+        wp_url: 'https://example.com',
+        username: 'admin',
+        app_password: 'xxxx',
+        cache_plugins: ['wp_rocket'],
+      },
+      cache_bust_deps: {
+        fetchFn: async () => { throw new Error('bust fail'); },
+      },
+    };
+    const result = await applyWPFix(issue, creds, mockDeps(), opts);
+    assert.equal(result.success, true);
   });
 });

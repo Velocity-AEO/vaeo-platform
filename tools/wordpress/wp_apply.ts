@@ -23,6 +23,8 @@ import { planWpImageFixes, type WpImageFix } from '../optimize/wp_image_plan.js'
 import { applyWpImageFixes } from '../apply/wp_image_apply.js';
 import { detectResourceHints } from '../detect/resource_hint_detect.js';
 import { generateResourceHintPlan } from '../optimize/resource_hint_plan.js';
+import { detectActivePlugins, detectSEOCoverage, buildSafeWriteList } from './plugin_conflict_detector.js';
+import { bustCacheAfterFix, type CacheBustConfig, type CacheBustDeps } from './cache_bust.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -35,6 +37,14 @@ export interface WPApplyResult {
   timestamp_fixes?: TimestampFix[];
   image_fixes?:     WpImageFix[];
   resource_hints?:  { injected_count: number; domains: string[] };
+  skipped_signals?: string[];
+}
+
+export interface WPApplyConflictOptions {
+  plugin_slugs?: string[];
+  page_html?:    string;
+  cache_bust_config?: CacheBustConfig;
+  cache_bust_deps?:   CacheBustDeps;
 }
 
 export interface WPApplyDeps {
@@ -303,25 +313,70 @@ async function applyImageFix(
  * Routes to the correct method based on issue category.
  * Never throws — returns WPApplyResult with success flag.
  */
+// ── Signal mapping: issue category → SEO coverage signal ─────────────────
+
+const CATEGORY_TO_SIGNAL: Record<string, string> = {
+  schema:   'json_ld_schema',
+  metadata: 'title_tag',
+};
+
+const ISSUE_TO_SIGNAL: Record<string, string> = {
+  TITLE_MISSING:      'title_tag',
+  TITLE_LONG:         'title_tag',
+  META_DESC_MISSING:  'meta_description',
+  META_DESC_LONG:     'meta_description',
+  SCHEMA_MISSING:     'json_ld_schema',
+  OG_MISSING:         'og_tags',
+  TWITTER_MISSING:    'twitter_tags',
+  CANONICAL_MISSING:  'canonical',
+};
+
 export async function applyWPFix(
   issue: WPIssue,
   credentials: WPCredentials,
   _testDeps?: Partial<WPApplyDeps>,
+  conflictOptions?: WPApplyConflictOptions,
 ): Promise<WPApplyResult> {
   const deps = { ...defaultDeps(), ..._testDeps };
 
   try {
+    // ── Conflict check: skip signals already covered by SEO plugins ──
+    const skipped_signals: string[] = [];
+    if (conflictOptions?.plugin_slugs && conflictOptions.page_html) {
+      const activePlugins = detectActivePlugins(conflictOptions.plugin_slugs);
+      if (activePlugins.detected.length > 0) {
+        const coverage = detectSEOCoverage(conflictOptions.page_html, activePlugins);
+        const safeList = buildSafeWriteList(coverage);
+        const signal = ISSUE_TO_SIGNAL[issue.issue_type] ?? CATEGORY_TO_SIGNAL[issue.category];
+        if (signal && !safeList.includes(signal)) {
+          skipped_signals.push(signal);
+          return {
+            issue_type: issue.issue_type,
+            url:        issue.url,
+            success:    true,
+            action:     'skipped_plugin_conflict',
+            skipped_signals,
+          };
+        }
+      }
+    }
+
+    let result: WPApplyResult;
     switch (issue.category) {
       case 'schema':
-        return await applySchemaFix(issue, credentials, deps);
+        result = await applySchemaFix(issue, credentials, deps);
+        break;
       case 'metadata':
-        return await applyTitleMetaFix(issue, credentials, deps);
+        result = await applyTitleMetaFix(issue, credentials, deps);
+        break;
       case 'performance':
-        return await applyPerformanceFix(issue, credentials, deps);
+        result = await applyPerformanceFix(issue, credentials, deps);
+        break;
       case 'images':
-        return await applyImageFix(issue, credentials, deps);
+        result = await applyImageFix(issue, credentials, deps);
+        break;
       default:
-        return {
+        result = {
           issue_type: issue.issue_type,
           url:        issue.url,
           success:    false,
@@ -329,6 +384,21 @@ export async function applyWPFix(
           error:      `Unknown issue category: ${issue.category}`,
         };
     }
+
+    // ── Cache bust after successful apply ──
+    if (result.success && conflictOptions?.cache_bust_config) {
+      try {
+        await bustCacheAfterFix(
+          conflictOptions.cache_bust_config,
+          [issue.url],
+          conflictOptions.cache_bust_deps,
+        );
+      } catch {
+        // Non-fatal — cache bust failure must not block apply
+      }
+    }
+
+    return result;
   } catch (err) {
     return {
       issue_type: issue.issue_type,
