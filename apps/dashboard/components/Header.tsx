@@ -30,6 +30,7 @@ const NAV = [
   { href: '/billing',    label: 'Billing'        },
   { href: '/qa',         label: 'QA'             },
   { href: '/debug',      label: 'Debug'          },
+  { href: '/client/demo-store/value', label: 'Proof of Value' },
 ];
 
 export default function Header() {
