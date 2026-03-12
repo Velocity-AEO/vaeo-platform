@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
@@ -75,12 +75,35 @@ function TrendArrow({ trend }: { trend: string }) {
 
 export default function ClientDashboard() {
   const params  = useParams<{ siteId: string }>();
+  const router  = useRouter();
   const siteId  = params?.siteId ?? '';
 
+  const [authChecked,  setAuthChecked]  = useState(false);
   const [data,         setData]         = useState<StatsData | null>(null);
   const [history,      setHistory]      = useState<HistoryPoint[]>([]);
   const [loading,      setLoading]      = useState(true);
   const [error,        setError]        = useState<string | null>(null);
+
+  // Auth guard — check client access on mount
+  useEffect(() => {
+    if (!siteId) { setAuthChecked(true); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/auth/check?siteId=${encodeURIComponent(siteId)}`);
+        if (!res.ok) { if (!cancelled) router.replace('/login'); return; }
+        const result = await res.json();
+        if (!result.allowed) {
+          if (!cancelled) router.replace(result.redirect_to ?? '/login');
+          return;
+        }
+      } catch {
+        // Non-fatal — allow page to render if auth endpoint unavailable
+      }
+      if (!cancelled) setAuthChecked(true);
+    })();
+    return () => { cancelled = true; };
+  }, [siteId, router]);
 
   // Rankings pagination / filter
   const [rankSort, setRankSort]         = useState<'position' | 'impressions'>('position');
@@ -123,6 +146,10 @@ export default function ClientDashboard() {
 
   useEffect(() => { load(); }, [load]);
 
+  // ── Auth guard pending ─────────────────────────────────────────────────────
+
+  if (!authChecked) return null;
+
   // ── Error / No siteId ──────────────────────────────────────────────────────
 
   if (!siteId) {
@@ -148,7 +175,7 @@ export default function ClientDashboard() {
     return (
       <div className="space-y-6 p-6">
         <Skeleton className="h-8 w-64" />
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {[0,1,2,3].map(i => <Skeleton key={i} className="h-24" />)}
         </div>
         <Skeleton className="h-64" />
@@ -180,19 +207,19 @@ export default function ClientDashboard() {
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <div className="space-y-8 p-6 max-w-screen-xl mx-auto">
+    <div className="space-y-8 px-4 py-6 md:px-6 w-full max-w-7xl mx-auto">
 
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <div>
-          <h1 className="text-xl font-bold text-slate-800">{stats.domain}</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Client Dashboard · Site ID: {stats.site_id}</p>
+          <h1 className="text-lg md:text-xl font-bold text-slate-800 truncate max-w-xs md:max-w-none">{stats.domain}</h1>
+          <p className="text-xs md:text-sm text-slate-500 mt-0.5">Client Dashboard · Site ID: {stats.site_id}</p>
         </div>
         <HealthBadge score={stats.health_score} />
       </div>
 
       {/* Top metrics bar */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <MetricCard
           label="Health Score"
           value={stats.health_score}
