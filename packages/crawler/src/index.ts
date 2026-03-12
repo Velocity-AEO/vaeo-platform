@@ -506,13 +506,14 @@ export async function crawlSite(request: CrawlSiteRequest): Promise<CrawlSiteRes
 
 /** Options passed to the legacy crawl() entry point. */
 export interface CrawlOptions {
-  run_id:     string;
-  tenant_id:  string;
-  site_id:    string;
-  cms:        string;
-  start_url:  string;
-  max_urls?:  number;
-  max_depth?: number;
+  run_id:      string;
+  tenant_id:   string;
+  site_id:     string;
+  cms:         string;
+  start_url:   string;
+  max_urls?:   number;
+  max_depth?:  number;
+  req_per_sec?: number;
 }
 
 /** Aggregate summary returned by the legacy crawl() entry point. */
@@ -520,15 +521,272 @@ export interface LegacyCrawlResult {
   urls_crawled: number;
   urls_failed:  number;
   duration_ms:  number;
+  stored_at?:   string;
 }
+
+// ── Ops-injectable crawl engine ───────────────────────────────────────────────
+
+export interface RawPage {
+  url:            string;
+  html:           string;
+  status_code:    number;
+  load_time_ms:   number;
+  redirect_chain: string[];
+}
+
+export interface ExtractOpts {
+  run_id:         string;
+  tenant_id:      string;
+  site_id:        string;
+  start_domain:   string;
+  status_code:    number;
+  load_time_ms:   number;
+  redirect_chain: string[];
+}
+
+export interface CrawlPageImage {
+  src:     string;
+  alt:     string;
+  width:   string | null;
+  height:  string | null;
+  size_kb: null;
+}
+
+export interface CrawlPageLink {
+  href: string;
+}
+
+export interface CrawlPageData {
+  url:            string;
+  run_id:         string;
+  tenant_id:      string;
+  site_id:        string;
+  title:          string | null;
+  meta_desc:      string | null;
+  h1:             string[];
+  h2:             string[];
+  canonical:      string | null;
+  schema_blocks:  string[];
+  images:         CrawlPageImage[];
+  internal_links: CrawlPageLink[];
+  status_code:    number;
+  load_time_ms:   number;
+}
+
+// ── Pure extraction helpers ───────────────────────────────────────────────────
+
+function extractAttr(html: string, pattern: RegExp, group = 1): string | null {
+  const m = html.match(pattern);
+  return m ? (m[group] ?? null) : null;
+}
+
+function extractAll(html: string, re: RegExp, group = 1): string[] {
+  const results: string[] = [];
+  let m: RegExpExecArray | null;
+  const g = new RegExp(re.source, 'gi');
+  while ((m = g.exec(html)) !== null) {
+    const val = m[group];
+    if (val) results.push(val.replace(/<[^>]+>/g, '').trim());
+  }
+  return results;
+}
+
+export function extractPageData(html: string, url: string, opts: ExtractOpts): CrawlPageData {
+  const title    = extractAttr(html, /<title[^>]*>([^<]*)<\/title>/i) ?? null;
+  const meta_desc = extractAttr(html, /<meta\s+name=["']description["'][^>]+content=["']([^"']+)["']/i)
+                 ?? extractAttr(html, /<meta\s+content=["']([^"']+)["'][^>]+name=["']description["']/i)
+                 ?? null;
+  const canonical = extractAttr(html, /<link\s[^>]*rel=["']canonical["'][^>]+href=["']([^"']+)["']/i)
+                  ?? extractAttr(html, /<link\s[^>]*href=["']([^"']+)["'][^>]*rel=["']canonical["']/i)
+                  ?? null;
+
+  const h1 = extractAll(html, /<h1[^>]*>(.*?)<\/h1>/i);
+  const h2 = extractAll(html, /<h2[^>]*>(.*?)<\/h2>/i);
+
+  // JSON-LD schema blocks
+  const schema_blocks: string[] = [];
+  const schemaRe = /<script\s+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let sm: RegExpExecArray | null;
+  while ((sm = schemaRe.exec(html)) !== null) {
+    if (sm[1]) schema_blocks.push(sm[1].trim());
+  }
+
+  // Images
+  const images: CrawlPageImage[] = [];
+  const imgRe = /<img\s([^>]*)>/gi;
+  let im: RegExpExecArray | null;
+  while ((im = imgRe.exec(html)) !== null) {
+    const attrs = im[1] ?? '';
+    const src    = extractAttr(attrs, /src=["']([^"']+)["']/i) ?? '';
+    const alt    = extractAttr(attrs, /alt=["']([^"']*)["']/i) ?? '';
+    const width  = extractAttr(attrs, /width=["']?(\d+)["']?/i);
+    const height = extractAttr(attrs, /height=["']?(\d+)["']?/i);
+    images.push({ src, alt, width, height, size_kb: null });
+  }
+
+  // Internal links (relative or same-domain absolute, exclude mailto/fragment)
+  const internal_links: CrawlPageLink[] = [];
+  const linkRe = /<a\s[^>]*href=["']([^"'#][^"']*)["']/gi;
+  let lm: RegExpExecArray | null;
+  const domain = opts.start_domain;
+  while ((lm = linkRe.exec(html)) !== null) {
+    const href = lm[1] ?? '';
+    if (href.startsWith('mailto:') || href.startsWith('tel:')) continue;
+    if (href.startsWith('http')) {
+      try {
+        const u = new URL(href);
+        if (u.hostname !== domain) continue;
+      } catch { continue; }
+    }
+    internal_links.push({ href });
+  }
+
+  return {
+    url,
+    run_id:         opts.run_id,
+    tenant_id:      opts.tenant_id,
+    site_id:        opts.site_id,
+    title,
+    meta_desc,
+    h1,
+    h2,
+    canonical,
+    schema_blocks,
+    images,
+    internal_links,
+    status_code:    opts.status_code,
+    load_time_ms:   opts.load_time_ms,
+  };
+}
+
+// ── shouldSkipUrl ─────────────────────────────────────────────────────────────
+
+const SKIP_PATTERNS = [
+  /\/account($|\/)/,
+  /\/customer_authentication/,
+  /\/cart($|\/|\?)/,
+  /\/checkout($|\/|\?)/,
+  /\/password($|\/)/,
+  /\/cdn\//,
+  /\.(js|css|woff2?|ttf|otf|eot|svg|png|jpg|jpeg|gif|webp|ico|map)(\?|$)/i,
+];
+
+export function shouldSkipUrl(url: string): boolean {
+  return SKIP_PATTERNS.some(p => p.test(url));
+}
+
+// ── Ops injection (unified crawl engine) ─────────────────────────────────────
+
+type StoreResultFn = (data: CrawlPageData) => Promise<void>;
+type OnPageFn      = (raw: RawPage) => Promise<void>;
+type OnFailFn      = (url: string, err: Error) => Promise<void>;
+type RunCrawlerFn  = (
+  opts: Required<CrawlOptions>,
+  onPage: OnPageFn,
+  onFail: OnFailFn,
+) => Promise<void>;
+
+interface CrawlOps {
+  storeResult?: StoreResultFn;
+  runCrawler?:  RunCrawlerFn;
+}
+
+let _ops: CrawlOps | null = null;
+
+export function _injectOps(ops: CrawlOps): void {
+  _ops = ops;
+}
+
+export function _resetOps(): void {
+  _ops = null;
+}
+
+// ── Internal action log writer ────────────────────────────────────────────────
+
+function writeLog(entry: Record<string, unknown>): void {
+  process.stdout.write(JSON.stringify(entry) + '\n');
+}
+
+// ── crawl() with ops support ──────────────────────────────────────────────────
 
 /**
  * Legacy entry point — wraps crawlSite() so packages/commands/src/crawl.ts
  * continues to work without modification.
+ * When ops are injected via _injectOps(), uses the injectable engine instead.
  */
 export async function crawl(opts: CrawlOptions): Promise<LegacyCrawlResult> {
   const startMs = Date.now();
-  const result  = await crawlSite({
+
+  const fullOpts: Required<CrawlOptions> = {
+    run_id:      opts.run_id,
+    tenant_id:   opts.tenant_id,
+    site_id:     opts.site_id,
+    cms:         opts.cms,
+    start_url:   opts.start_url,
+    max_urls:    opts.max_urls    ?? 2000,
+    max_depth:   opts.max_depth   ?? 3,
+    req_per_sec: opts.req_per_sec ?? 1,
+  };
+
+  // Ops-based path (used in tests and injectable contexts)
+  if (_ops) {
+    const ops       = _ops;
+    let urls_crawled = 0;
+    let urls_failed  = 0;
+
+    const domain = (() => {
+      try { return new URL(opts.start_url).hostname; } catch { return opts.start_url; }
+    })();
+
+    writeLog({
+      stage:    'crawl:start',
+      status:   'pending',
+      command:  'crawl',
+      run_id:   opts.run_id,
+      metadata: { start_url: opts.start_url, cms: opts.cms },
+    });
+
+    const onPage: OnPageFn = async (raw) => {
+      urls_crawled++;
+      const extractOpts: ExtractOpts = {
+        run_id:         opts.run_id,
+        tenant_id:      opts.tenant_id,
+        site_id:        opts.site_id,
+        start_domain:   domain,
+        status_code:    raw.status_code,
+        load_time_ms:   raw.load_time_ms,
+        redirect_chain: raw.redirect_chain,
+      };
+      const data = extractPageData(raw.html, raw.url, extractOpts);
+      if (ops.storeResult) await ops.storeResult(data);
+      if (urls_crawled % 50 === 0) {
+        writeLog({ stage: 'crawl:url_complete', status: 'ok', metadata: { count: urls_crawled } });
+      }
+    };
+
+    const onFail: OnFailFn = async (url, err) => {
+      urls_failed++;
+      writeLog({ stage: 'crawl:url_failed', status: 'failed', url, error: err.message });
+    };
+
+    if (ops.runCrawler) await ops.runCrawler(fullOpts, onPage, onFail);
+
+    writeLog({
+      stage:    'crawl:complete',
+      status:   'ok',
+      metadata: { urls_crawled, urls_failed },
+    });
+
+    return {
+      urls_crawled,
+      urls_failed,
+      duration_ms: Date.now() - startMs,
+      stored_at:   new Date().toISOString(),
+    };
+  }
+
+  // Legacy path — calls crawlSite()
+  const result = await crawlSite({
     run_id:    opts.run_id,
     tenant_id: opts.tenant_id,
     site_id:   opts.site_id,
@@ -543,5 +801,35 @@ export async function crawl(opts: CrawlOptions): Promise<LegacyCrawlResult> {
     urls_crawled: result.urls_crawled,
     urls_failed,
     duration_ms:  Date.now() - startMs,
+    stored_at:    new Date().toISOString(),
   };
+}
+
+// ── crawlJobProcessor ─────────────────────────────────────────────────────────
+
+export async function crawlJobProcessor(job: {
+  data: {
+    run_id:    string;
+    tenant_id: string;
+    site_id:   string;
+    cms:       string;
+    payload:   {
+      start_url:    string;
+      max_urls?:    number;
+      max_depth?:   number;
+      req_per_sec?: number;
+    };
+  };
+}): Promise<LegacyCrawlResult> {
+  const { run_id, tenant_id, site_id, cms, payload } = job.data;
+  return crawl({
+    run_id,
+    tenant_id,
+    site_id,
+    cms,
+    start_url:   payload.start_url,
+    max_urls:    payload.max_urls,
+    max_depth:   payload.max_depth,
+    req_per_sec: payload.req_per_sec,
+  });
 }
