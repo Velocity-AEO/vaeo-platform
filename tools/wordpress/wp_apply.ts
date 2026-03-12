@@ -21,6 +21,8 @@ import { applyTimestampFixes } from '../apply/timestamp_apply.js';
 import { detectWpImageIssues } from '../detect/wp_image_detect.js';
 import { planWpImageFixes, type WpImageFix } from '../optimize/wp_image_plan.js';
 import { applyWpImageFixes } from '../apply/wp_image_apply.js';
+import { detectResourceHints } from '../detect/resource_hint_detect.js';
+import { generateResourceHintPlan } from '../optimize/resource_hint_plan.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -32,6 +34,7 @@ export interface WPApplyResult {
   error?:           string;
   timestamp_fixes?: TimestampFix[];
   image_fixes?:     WpImageFix[];
+  resource_hints?:  { injected_count: number; domains: string[] };
 }
 
 export interface WPApplyDeps {
@@ -421,6 +424,50 @@ export async function applyAllWPFixes(
         }
       } catch {
         // Non-fatal — image failure must not block main fixes
+      }
+    }
+  } catch {
+    // Non-fatal
+  }
+
+  // ── Resource hint injection pass ─────────────────────────────────────────
+  // Detect missing preconnect/dns-prefetch hints from any page HTML,
+  // inject them globally via a wp_head PHP snippet. Once per batch. Non-fatal.
+  try {
+    const rhUrls = [...new Set(issues.map((i) => i.url))];
+    let hintsInjected = false;
+    for (const url of rhUrls) {
+      if (hintsInjected) break;
+      try {
+        const postId = await deps.lookupPostId(credentials, url);
+        if (!postId) continue;
+
+        const html = await deps.getPostContent(credentials, postId);
+        if (!html) continue;
+
+        const signals = detectResourceHints(html, url);
+        if (!signals.needs_hints) continue;
+
+        const plan = generateResourceHintPlan(signals, url);
+        if (plan.entries.length === 0) continue;
+
+        // Build PHP snippet to emit resource hints via wp_head
+        const tagHtml = plan.insert_html.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        const snippet = `function vaeo_resource_hints() {\n  echo '${tagHtml}';\n}\nadd_action('wp_head', 'vaeo_resource_hints', 1);`;
+
+        await deps.injectSnippet(credentials, 'vaeo_resource_hints', snippet);
+        hintsInjected = true;
+
+        // Attach resource_hints to the last result in the batch
+        const lastResult = results[results.length - 1];
+        if (lastResult) {
+          lastResult.resource_hints = {
+            injected_count: plan.entries.length,
+            domains:        plan.entries.map((e) => e.domain),
+          };
+        }
+      } catch {
+        // Non-fatal — resource hint failure must not block main fixes
       }
     }
   } catch {
