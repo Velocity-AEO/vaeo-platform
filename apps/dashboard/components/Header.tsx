@@ -31,6 +31,7 @@ const NAV = [
   { href: '/qa',         label: 'QA'             },
   { href: '/debug',      label: 'Debug'          },
   { href: '/client/demo-store/value', label: 'Proof of Value' },
+  { href: '/client/demo-store/suggestions', label: 'Suggestions' },
 ];
 
 export default function Header() {
