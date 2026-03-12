@@ -623,3 +623,87 @@ describe('applyFix — resource hints wiring', () => {
     assert.ok(rhCalled);
   });
 });
+
+describe('applyFix — debug + learning wiring', () => {
+  it('populates debug_events on a successful Shopify fix', async () => {
+    const deps = makeDeps();
+    const result = await applyFix(makeItem(), deps);
+    assert.ok(result.success);
+    assert.ok(Array.isArray(result.debug_events));
+    assert.ok((result.debug_events?.length ?? 0) > 0);
+  });
+
+  it('debug_events include a decision event', async () => {
+    const deps = makeDeps();
+    const result = await applyFix(makeItem(), deps);
+    const decision = result.debug_events?.find((e) => e.event_type === 'decision');
+    assert.ok(decision);
+    assert.ok(decision!.reasoning.includes('Selected fix type'));
+  });
+
+  it('debug_events include a fix_applied event on success', async () => {
+    const deps = makeDeps();
+    const result = await applyFix(makeItem(), deps);
+    const fixApplied = result.debug_events?.find((e) => e.event_type === 'fix_applied');
+    assert.ok(fixApplied);
+  });
+
+  it('debug_events include a fix_failed event on adapter failure', async () => {
+    const deps = makeDeps({
+      shopifyApplyFix: async (req) => ({
+        action_id: req.action_id, success: false, fix_type: req.fix_type,
+        sandbox: false, error: 'adapter error',
+      }),
+    });
+    const result = await applyFix(makeItem(), deps);
+    const fixFailed = result.debug_events?.find((e) => e.event_type === 'fix_failed');
+    assert.ok(fixFailed);
+  });
+
+  it('populates learning_result on success', async () => {
+    const deps = makeDeps();
+    const result = await applyFix(makeItem(), deps);
+    assert.ok(result.learning_result);
+    assert.ok(result.learning_result!.pattern_key.length > 0);
+  });
+
+  it('learning_result has confidence_delta > 0 on success', async () => {
+    const deps = makeDeps();
+    const result = await applyFix(makeItem(), deps);
+    assert.ok((result.learning_result?.confidence_delta ?? -1) > 0);
+  });
+
+  it('learning_result has written=true when writeLearning dep provided', async () => {
+    const deps = makeDeps({
+      writeLearning: async () => 'lr-test-001',
+    });
+    const result = await applyFix(makeItem(), deps);
+    assert.equal(result.learning_result?.written, true);
+    assert.equal(result.learning_result?.learning_id, 'lr-test-001');
+  });
+
+  it('debug_events include learning_write when writeLearning provided', async () => {
+    const deps = makeDeps({
+      writeLearning: async () => 'lr-test-001',
+    });
+    const result = await applyFix(makeItem(), deps);
+    const lw = result.debug_events?.find((e) => e.event_type === 'learning_write');
+    assert.ok(lw);
+  });
+
+  it('debug operations are non-fatal — fix succeeds even if writeLearning throws', async () => {
+    const deps = makeDeps({
+      writeLearning: async () => { throw new Error('DB error'); },
+    });
+    const result = await applyFix(makeItem(), deps);
+    assert.equal(result.success, true);
+  });
+
+  it('confidence_score on item is passed to debug event', async () => {
+    const deps = makeDeps();
+    const item = makeItem({ confidence_score: 0.92 } as Partial<import('./apply_engine.js').ApprovedItem>);
+    const result = await applyFix(item, deps);
+    const fixApplied = result.debug_events?.find((e) => e.event_type === 'fix_applied');
+    assert.equal(fixApplied?.confidence_score, 0.92);
+  });
+});

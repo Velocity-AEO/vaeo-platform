@@ -19,6 +19,9 @@
 
 import type { ShopifyFixRequest, ShopifyFixResult } from '../../packages/adapters/shopify/src/index.js';
 import type { TimestampFix } from '../optimize/timestamp_plan.js';
+import { createDebugSession, logDebugEvent, type DebugEvent, type DebugSession } from '../debug/debug_logger.js';
+import { captureSnapshot, diffSnapshots, shouldCaptureSnapshot } from '../debug/html_snapshot.js';
+import { activateLearning, type LearningActivationResult, type LearningRecord } from '../debug/learning_activator.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -35,6 +38,8 @@ export interface ApprovedItem {
   execution_status: string;
   /** Triage recommendation — checked before applying. */
   triage_recommendation?: string | null;
+  /** Confidence score from ML pipeline (0-1). */
+  confidence_score?: number;
 }
 
 export interface ApplyResult {
@@ -48,7 +53,14 @@ export interface ApplyResult {
   timestamp_fixes?: TimestampFix[];
   /** Resource hints injected as a non-fatal post-processing step. */
   resource_hints?: { injected_count: number; domains: string[] };
+  /** Debug events captured during this fix (only when debug_mode=true). */
+  debug_events?: DebugEvent[];
+  /** Learning center activation result. */
+  learning_result?: LearningActivationResult;
 }
+
+// Re-export for consumers
+export type { LearningRecord, LearningActivationResult, DebugEvent };
 
 export interface ApplyBatchResult {
   applied: number;
@@ -124,6 +136,16 @@ export interface ApplyDeps {
     item:  ApprovedItem,
     creds: { access_token: string; store_url: string },
   ) => Promise<{ injected_count: number; domains: string[]; error?: string }>;
+  /**
+   * Optional — enable debug event capture (snapshots, events).
+   * When true, before/after HTML snapshots are taken for fix_applied/fix_failed events.
+   */
+  debug_mode?: boolean;
+  /**
+   * Optional — write a learning record to the learnings table.
+   * Called after every fix (success or failure). Non-fatal.
+   */
+  writeLearning?: (record: LearningRecord) => Promise<string>;
 }
 
 // ── Issue type → Shopify fix type mapping ───────────────────────────────────
@@ -430,6 +452,90 @@ function defaultDeps(): ApplyDeps {
   };
 }
 
+// ── Debug + learning helper ──────────────────────────────────────────────────
+
+/**
+ * Non-fatally log a fix event and activate learning for the result.
+ * Returns debug_events and learning_result to spread into ApplyResult.
+ */
+async function runDebugAndLearn(
+  session:    DebugSession,
+  success:    boolean,
+  item:       ApprovedItem,
+  deps:       ApplyDeps,
+  fixType:    string,
+  opts: {
+    error?:       string;
+    duration_ms?: number;
+    before_html?: string;
+    after_html?:  string;
+  } = {},
+): Promise<{ debug_events: DebugEvent[]; learning_result: LearningActivationResult | undefined }> {
+  try {
+    const capture = shouldCaptureSnapshot(
+      success ? 'fix_applied' : 'fix_failed',
+      deps.debug_mode ?? false,
+    );
+
+    const before_html = capture && opts.before_html
+      ? captureSnapshot(opts.before_html)
+      : undefined;
+    const after_html = capture && opts.after_html
+      ? captureSnapshot(opts.after_html)
+      : undefined;
+
+    let change_summary: string | undefined;
+    if (before_html && after_html) {
+      change_summary = diffSnapshots(before_html, after_html).change_summary;
+    }
+
+    logDebugEvent(session, {
+      site_id:          item.site_id,
+      event_type:       success ? 'fix_applied' : 'fix_failed',
+      issue_type:       item.issue_type,
+      url:              item.url,
+      reasoning:        success
+        ? `Fix applied successfully: ${fixType}`
+        : `Fix failed: ${opts.error ?? 'unknown'}`,
+      confidence_score: item.confidence_score,
+      duration_ms:      opts.duration_ms,
+      before_html:      before_html,
+      after_html:       after_html,
+      ...(change_summary ? { metadata: { change_summary } } : {}),
+    });
+
+    const lr = await activateLearning(
+      item.site_id,
+      item.issue_type,
+      item.url,
+      success,
+      5,  // default positive health delta per fix
+      item.confidence_score ?? 0.5,
+      before_html,
+      after_html,
+      { writeLearning: deps.writeLearning },
+    );
+
+    if (lr.written) {
+      logDebugEvent(session, {
+        site_id:          item.site_id,
+        event_type:       'learning_write',
+        issue_type:       item.issue_type,
+        url:              item.url,
+        reasoning:        `Learning written: pattern=${lr.pattern_key}, delta=${lr.confidence_delta.toFixed(3)}`,
+        confidence_score: item.confidence_score,
+      });
+    }
+
+    return {
+      debug_events:    session.events.length > 0 ? [...session.events] : undefined as unknown as DebugEvent[],
+      learning_result: lr,
+    };
+  } catch {
+    return { debug_events: session.events, learning_result: undefined };
+  }
+}
+
 // ── Resource hints helper ────────────────────────────────────────────────────
 
 /**
@@ -475,6 +581,9 @@ export async function applyFix(
 ): Promise<ApplyResult> {
   const deps = { ...defaultDeps(), ..._testDeps };
   const start = Date.now();
+
+  // ── Debug session ──────────────────────────────────────────────────────────
+  const _dbgSession = createDebugSession(item.site_id);
 
   // Validate status
   if (item.execution_status !== 'approved') {
@@ -525,8 +634,23 @@ export async function applyFix(
     const err = `Unknown issue_type: ${item.issue_type}`;
     try { await deps.markFailed(item.id, err); } catch { /* non-fatal */ }
     deps.writeLog({ action_id: item.id, stage: 'apply:failed', status: 'failed', error: err });
-    return { action_id: item.id, success: false, fix_type: item.issue_type, error: err };
+    const { debug_events: _de0, learning_result: _lr0 } = await runDebugAndLearn(
+      _dbgSession, false, item, deps, item.issue_type, { error: err, duration_ms: Date.now() - start },
+    );
+    return { action_id: item.id, success: false, fix_type: item.issue_type, error: err,
+      ...(_de0?.length ? { debug_events: _de0 } : {}), ...(_lr0 ? { learning_result: _lr0 } : {}) };
   }
+
+  // ── Decision event ─────────────────────────────────────────────────────────
+  try {
+    logDebugEvent(_dbgSession, {
+      site_id:    item.site_id,
+      event_type: 'decision',
+      issue_type: item.issue_type,
+      url:        item.url,
+      reasoning:  `Selected fix type: ${fixType}`,
+    });
+  } catch { /* non-fatal */ }
 
   // Load credentials
   let creds: { access_token: string; store_url: string };
@@ -560,7 +684,12 @@ export async function applyFix(
         duration_ms: Date.now() - start,
       });
       const rh_schema = await runResourceHints(deps, item, creds);
-      return { action_id: item.id, success: true, fix_type: 'schema', ...(rh_schema ? { resource_hints: rh_schema } : {}) };
+      const { debug_events: _de_s1, learning_result: _lr_s1 } = await runDebugAndLearn(
+        _dbgSession, true, item, deps, 'schema', { duration_ms: Date.now() - start },
+      );
+      return { action_id: item.id, success: true, fix_type: 'schema',
+        ...(rh_schema ? { resource_hints: rh_schema } : {}),
+        ...(_de_s1?.length ? { debug_events: _de_s1 } : {}), ...(_lr_s1 ? { learning_result: _lr_s1 } : {}) };
     }
     const errMsg = sr.error ?? 'Schema apply failed';
     try { await deps.markFailed(item.id, errMsg); } catch { /* non-fatal */ }
@@ -572,7 +701,11 @@ export async function applyFix(
       error:       errMsg,
       duration_ms: Date.now() - start,
     });
-    return { action_id: item.id, success: false, fix_type: 'schema', error: errMsg };
+    const { debug_events: _de_s2, learning_result: _lr_s2 } = await runDebugAndLearn(
+      _dbgSession, false, item, deps, 'schema', { error: errMsg, duration_ms: Date.now() - start },
+    );
+    return { action_id: item.id, success: false, fix_type: 'schema', error: errMsg,
+      ...(_de_s2?.length ? { debug_events: _de_s2 } : {}), ...(_lr_s2 ? { learning_result: _lr_s2 } : {}) };
   }
 
   // ── Performance intercept ──────────────────────────────────────────────
@@ -753,7 +886,11 @@ export async function applyFix(
       error:       msg,
       duration_ms: Date.now() - start,
     });
-    return { action_id: item.id, success: false, fix_type: fixType, error: msg };
+    const { debug_events: _de_ex, learning_result: _lr_ex } = await runDebugAndLearn(
+      _dbgSession, false, item, deps, fixType, { error: msg, duration_ms: Date.now() - start },
+    );
+    return { action_id: item.id, success: false, fix_type: fixType, error: msg,
+      ...(_de_ex?.length ? { debug_events: _de_ex } : {}), ...(_lr_ex ? { learning_result: _lr_ex } : {}) };
   }
 
   const duration = Date.now() - start;
@@ -769,12 +906,18 @@ export async function applyFix(
       duration_ms: duration,
     });
     const rh_shopify = await runResourceHints(deps, item, creds);
+    const beforeHtml = result.before_value ? JSON.stringify(result.before_value) : undefined;
+    const { debug_events: _de_ok, learning_result: _lr_ok } = await runDebugAndLearn(
+      _dbgSession, true, item, deps, fixType,
+      { duration_ms: duration, before_html: beforeHtml },
+    );
     return {
       action_id:    item.id,
       success:      true,
       fix_type:     fixType,
       before_value: result.before_value,
       ...(rh_shopify ? { resource_hints: rh_shopify } : {}),
+      ...(_de_ok?.length ? { debug_events: _de_ok } : {}), ...(_lr_ok ? { learning_result: _lr_ok } : {}),
     };
   }
 
@@ -789,7 +932,11 @@ export async function applyFix(
     error:       errMsg,
     duration_ms: duration,
   });
-  return { action_id: item.id, success: false, fix_type: fixType, error: errMsg };
+  const { debug_events: _de_fail, learning_result: _lr_fail } = await runDebugAndLearn(
+    _dbgSession, false, item, deps, fixType, { error: errMsg, duration_ms: duration },
+  );
+  return { action_id: item.id, success: false, fix_type: fixType, error: errMsg,
+    ...(_de_fail?.length ? { debug_events: _de_fail } : {}), ...(_lr_fail ? { learning_result: _lr_fail } : {}) };
 }
 
 // ── applyBatch ──────────────────────────────────────────────────────────────
