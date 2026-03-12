@@ -19,6 +19,8 @@ const NAV = [
   { href: '/vehicle',       label: 'Vehicle Schema' },
   { href: '/localbusiness', label: 'Local SEO'      },
   { href: '/accessibility', label: 'Accessibility'  },
+  { href: '/environment',   label: 'App Environment' },
+  { href: '/native',        label: 'Native'          },
   { href: '/onboarding',    label: 'Connect Site'   },
   { href: '/billing',    label: 'Billing'        },
 ];
