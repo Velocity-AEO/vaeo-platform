@@ -5,6 +5,9 @@ import { useParams } from 'next/navigation';
 import HealthTrend from './HealthTrend';
 import FixesPanel from './FixesPanel';
 import PerformancePanel from './PerformancePanel';
+import RegressionsPanel from './RegressionsPanel';
+import AEOPanel from './AEOPanel';
+import GSCPanel from './GSCPanel';
 
 type Tab = 'overview' | 'fixes' | 'performance' | 'regressions' | 'aeo' | 'gsc';
 
@@ -185,15 +188,9 @@ export default function ReportPage() {
       {activeTab === 'overview' && <HealthTrend health={report.health} />}
       {activeTab === 'fixes' && <FixesPanel fixes={report.fixes} />}
       {activeTab === 'performance' && <PerformancePanel performance={report.performance} />}
-      {activeTab === 'regressions' && (
-        <div className="text-sm text-slate-500">Regressions panel — see Regressions tab</div>
-      )}
-      {activeTab === 'aeo' && (
-        <div className="text-sm text-slate-500">AEO panel — see AEO tab</div>
-      )}
-      {activeTab === 'gsc' && (
-        <div className="text-sm text-slate-500">GSC panel — see GSC tab</div>
-      )}
+      {activeTab === 'regressions' && <RegressionsPanel regressions={report.regressions} />}
+      {activeTab === 'aeo' && <AEOPanel aeo={report.aeo} />}
+      {activeTab === 'gsc' && <GSCPanel gsc={report.gsc} />}
     </div>
   );
 }
