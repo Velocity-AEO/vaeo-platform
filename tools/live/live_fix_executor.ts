@@ -24,6 +24,7 @@ export interface FixAttempt {
   dry_run:         boolean;
   error?:          string;
   debug_events:    string[];
+  data_source?:    'gsc_live' | 'simulated';
 }
 
 export interface FixBatch {
@@ -37,6 +38,7 @@ export interface FixBatch {
   deploy_count:       number;
   executed_at:        string;
   dry_run:            boolean;
+  data_source?:       'gsc_live' | 'simulated';
 }
 
 export interface FixDeps {
@@ -46,6 +48,7 @@ export interface FixDeps {
     Promise<{ passed: boolean; errors: string[] }>;
   deployFix?: (site_id: string, url: string, html: string) =>
     Promise<{ deployed: boolean }>;
+  data_source?: 'gsc_live' | 'simulated';
 }
 
 export interface BatchDeps extends FixDeps {
@@ -115,6 +118,8 @@ export async function executeFixAttempt(
   const startedAt = new Date().toISOString();
   const debug_events: string[] = [];
 
+  const data_source = deps?.data_source;
+
   try {
     const applyFix = deps?.applyFix ?? defaultApplyFix;
     const sandboxValidate = deps?.sandboxValidate ?? defaultSandboxValidate;
@@ -139,6 +144,7 @@ export async function executeFixAttempt(
         dry_run,
         error:          `Fix application failed for ${issue.fix_type}`,
         debug_events,
+        ...(data_source ? { data_source } : {}),
       };
     }
 
@@ -161,6 +167,7 @@ export async function executeFixAttempt(
         dry_run,
         error:          `Sandbox validation failed: ${sandboxResult.errors.join(', ')}`,
         debug_events,
+        ...(data_source ? { data_source } : {}),
       };
     }
 
@@ -187,6 +194,7 @@ export async function executeFixAttempt(
       deployed,
       dry_run,
       debug_events,
+      ...(data_source ? { data_source } : {}),
     };
   } catch (err) {
     debug_events.push(`[error] ${err instanceof Error ? err.message : String(err)}`);
@@ -203,6 +211,7 @@ export async function executeFixAttempt(
       dry_run,
       error:          err instanceof Error ? err.message : String(err),
       debug_events,
+      ...(data_source ? { data_source } : {}),
     };
   }
 }
@@ -237,6 +246,7 @@ export async function executeFixBatch(
   const sandbox_pass_count = attempts.filter((a) => a.sandbox_passed).length;
   const deploy_count = attempts.filter((a) => a.deployed).length;
 
+  const batch_data_source = deps?.data_source;
   return {
     batch_id:    generateBatchId(),
     run_id,
@@ -248,5 +258,6 @@ export async function executeFixBatch(
     deploy_count,
     executed_at: new Date().toISOString(),
     dry_run,
+    ...(batch_data_source ? { data_source: batch_data_source } : {}),
   };
 }

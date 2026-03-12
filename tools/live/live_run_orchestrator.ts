@@ -32,6 +32,11 @@ import {
   type FeedbackSummary,
   type FeedbackDeps,
 } from './feedback_loop.js';
+import {
+  summarizeDataSource,
+  type DataSourceSummary,
+} from './data_source_flag.js';
+import { fetchRankings } from '../rankings/rankings_service.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -42,12 +47,13 @@ export interface SystemHealthReport {
 }
 
 export interface LiveRunResult {
-  state:   LiveRunState;
-  crawl:   CrawlResult;
-  issues:  IssueAggregation;
-  fixes:   FixBatch;
-  health:  SystemHealthReport | null;
-  feedback_summary?: FeedbackSummary;
+  state:                LiveRunState;
+  crawl:                CrawlResult;
+  issues:               IssueAggregation;
+  fixes:                FixBatch;
+  health:               SystemHealthReport | null;
+  feedback_summary?:    FeedbackSummary;
+  data_source_summary?: DataSourceSummary;
 }
 
 export interface OrchestratorDeps {
@@ -70,6 +76,8 @@ export interface OrchestratorDeps {
   ) => Promise<FixBatch>;
   runHealthMonitor?: () => Promise<SystemHealthReport>;
   feedbackDeps?: FeedbackDeps;
+  /** Resolved data_source from rankings; when set, propagated to all fix records */
+  data_source?: 'gsc_live' | 'simulated';
 }
 
 // ── Orchestrator ─────────────────────────────────────────────────────────────
@@ -137,6 +145,23 @@ export async function runLiveProduction(
       issues_triaged: issues.auto_fixable_count,
     };
 
+    // Resolve data_source from rankings (best-effort, non-fatal)
+    let resolved_data_source: 'gsc_live' | 'simulated' | undefined = deps?.data_source;
+    if (!resolved_data_source) {
+      try {
+        const rankingEntries = await fetchRankings({
+          site_id:               target.site_id,
+          domain:                target.domain,
+          use_simulator_fallback: true,
+        });
+        if (rankingEntries.length > 0) {
+          resolved_data_source = rankingEntries[0]?.data_source;
+        }
+      } catch {
+        // non-fatal
+      }
+    }
+
     // Phase 3: Applying
     state = transitionPhase(state, 'applying', 'Applying fixes');
     const autoFixable = issues.issues.filter((i) => i.auto_fixable);
@@ -180,7 +205,10 @@ export async function runLiveProduction(
       }
     }
 
-    return { state, crawl, issues, fixes, health, feedback_summary };
+    const data_source_summary = summarizeDataSource(
+      fixes.attempts.map(a => ({ data_source: a.data_source ?? resolved_data_source })),
+    );
+    return { state, crawl, issues, fixes, health, feedback_summary, data_source_summary };
   } catch (err) {
     state = transitionPhase(
       state,
