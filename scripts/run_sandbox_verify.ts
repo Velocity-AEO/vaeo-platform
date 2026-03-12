@@ -20,22 +20,27 @@
 
 import { sandboxVerify, type VerifyResult } from '../tools/sandbox/sandbox_verify.js';
 import { logLearning, type LogLearningResult } from '../tools/learning/learning_logger.js';
-import { queueForApproval, type QueueResult } from '../tools/learning/approval_queue.js';
+import { queueForApproval, updateApprovalStatus, type QueueResult } from '../tools/learning/approval_queue.js';
+import { evaluateForAutoApproval, DEFAULT_AUTO_CONFIG } from '../tools/learning/auto_approver.js';
 
 // ── Wiring types ─────────────────────────────────────────────────────────────
 
 export interface SandboxWiringDeps {
-  verify:           (url: string)                                     => Promise<VerifyResult>;
-  logLearning:      (entry: Parameters<typeof logLearning>[0], db: unknown) => Promise<LogLearningResult>;
-  queueForApproval: (params: Parameters<typeof queueForApproval>[0], db: unknown) => Promise<QueueResult>;
+  verify:                 (url: string)                                     => Promise<VerifyResult>;
+  logLearning:            (entry: Parameters<typeof logLearning>[0], db: unknown) => Promise<LogLearningResult>;
+  queueForApproval:       (params: Parameters<typeof queueForApproval>[0], db: unknown) => Promise<QueueResult>;
+  evaluateAutoApproval?:  typeof evaluateForAutoApproval;
+  updateApprovalStatus?:  typeof updateApprovalStatus;
 }
 
 export interface SandboxWiringResult {
-  verifyResult: VerifyResult;
-  learningId?:  string;
-  queueId?:     string;
-  logError?:    string;
-  queueError?:  string;
+  verifyResult:    VerifyResult;
+  learningId?:     string;
+  queueId?:        string;
+  logError?:       string;
+  queueError?:     string;
+  autoApproved?:   boolean;
+  autoApproveReason?: string;
 }
 
 // ── Core wiring — exported for tests ─────────────────────────────────────────
@@ -45,11 +50,12 @@ export interface SandboxWiringResult {
  * Never throws — returns result objects.
  */
 export async function sandboxVerifyAndLog(
-  siteId:    string,
-  url:       string,
-  issueType: string,
-  db:        unknown,
-  deps:      SandboxWiringDeps,
+  siteId:        string,
+  url:           string,
+  issueType:     string,
+  db:            unknown,
+  deps:          SandboxWiringDeps,
+  options:       { autoApprove?: boolean; minConfidence?: number } = {},
 ): Promise<SandboxWiringResult> {
   const verifyResult = await deps.verify(url);
 
@@ -89,31 +95,60 @@ export async function sandboxVerifyAndLog(
     else        queueError = qr.error;
   }
 
+  // Auto-approval evaluation (if PASS, queue exists, and flag is set)
+  let autoApproved: boolean | undefined;
+  let autoApproveReason: string | undefined;
+
+  if (isPass && queueId && options.autoApprove && deps.evaluateAutoApproval && deps.updateApprovalStatus) {
+    const autoConfig = options.minConfidence
+      ? { ...DEFAULT_AUTO_CONFIG, min_confidence: options.minConfidence }
+      : DEFAULT_AUTO_CONFIG;
+
+    const evalResult = await deps.evaluateAutoApproval(
+      { id: queueId, url, issue_type: issueType, proposed_fix: verifyResult.rawSchema ?? '' },
+      autoConfig,
+      db,
+    );
+
+    autoApproved     = evalResult.approved;
+    autoApproveReason = evalResult.reason;
+
+    if (evalResult.approved) {
+      await deps.updateApprovalStatus(queueId, 'approved', `auto_approved=true; ${evalResult.reason}`, db as any);
+    }
+  }
+
   return {
     verifyResult,
-    learningId: logResult.ok ? logResult.id : undefined,
+    learningId:        logResult.ok ? logResult.id : undefined,
     queueId,
-    logError:   logResult.ok ? undefined : logResult.error,
+    logError:          logResult.ok ? undefined : logResult.error,
     queueError,
+    autoApproved,
+    autoApproveReason,
   };
 }
 
 // ── CLI helpers ───────────────────────────────────────────────────────────────
 
-function parseArgs(): { siteId: string; url: string } {
+function parseArgs(): { siteId: string; url: string; autoApprove: boolean; minConfidence: number } {
   const args = process.argv.slice(2);
-  let siteId = '';
-  let url = '';
+  let siteId        = '';
+  let url           = '';
+  let autoApprove   = false;
+  let minConfidence = 0.85;
 
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--site-id' && args[i + 1]) { siteId = args[++i]; continue; }
-    if (args[i] === '--url'     && args[i + 1]) { url    = args[++i]; continue; }
+    if (args[i] === '--site-id'        && args[i + 1]) { siteId        = args[++i]; continue; }
+    if (args[i] === '--url'            && args[i + 1]) { url           = args[++i]; continue; }
+    if (args[i] === '--auto-approve')                  { autoApprove   = true;      continue; }
+    if (args[i] === '--min-confidence' && args[i + 1]) { minConfidence = parseFloat(args[++i]); continue; }
   }
 
   if (!siteId) { console.error('Error: --site-id is required'); process.exit(1); }
   if (!url)    { console.error('Error: --url is required');     process.exit(1); }
 
-  return { siteId, url };
+  return { siteId, url, autoApprove, minConfidence };
 }
 
 async function createDb() {
@@ -128,7 +163,7 @@ async function createDb() {
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 async function main() {
-  const { siteId, url } = parseArgs();
+  const { siteId, url, autoApprove, minConfidence } = parseArgs();
 
   // Verify site exists
   const db = await createDb();
@@ -146,12 +181,14 @@ async function main() {
   console.log(`Site: ${site.site_url} (${siteId})`);
   console.log(`URL:  ${url}\n`);
 
-  // Wire: verify → log → queue
+  // Wire: verify → log → queue → optional auto-approve
   const wiring = await sandboxVerifyAndLog(siteId, url, 'SCHEMA_MISSING', db, {
-    verify:           sandboxVerify,
+    verify:                sandboxVerify,
     logLearning,
     queueForApproval,
-  });
+    evaluateAutoApproval:  evaluateForAutoApproval,
+    updateApprovalStatus,
+  }, { autoApprove, minConfidence });
 
   const { verifyResult } = wiring;
 
@@ -169,6 +206,14 @@ async function main() {
     console.log(`queue_id:    ${wiring.queueId}`);
   } else if (wiring.queueError) {
     console.warn(`queue failed (non-fatal): ${wiring.queueError}`);
+  }
+
+  if (wiring.autoApproved === true) {
+    console.log(`\nAUTO-APPROVED`);
+    console.log(`reason: ${wiring.autoApproveReason}`);
+  } else if (wiring.autoApproved === false) {
+    console.log(`\nQUEUED FOR MANUAL REVIEW`);
+    console.log(`reason: ${wiring.autoApproveReason}`);
   }
 
   // Best-effort: persist result to sites table
