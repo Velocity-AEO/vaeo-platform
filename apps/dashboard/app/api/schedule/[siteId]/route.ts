@@ -11,6 +11,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
 import { scheduleSiteCrawl, getScheduleStatus } from '../../../../../../tools/jobs/scheduler.js';
+import { checkBillingGate } from '../../../../../../tools/billing/billing_gate.js';
+import type { UsageDb } from '../../../../../../tools/billing/usage_tracker.js';
 
 export async function GET(
   _req: NextRequest,
@@ -46,6 +48,25 @@ export async function POST(
 
   if (siteErr || !site) {
     return NextResponse.json({ error: `Site not found: ${siteId}` }, { status: 404 });
+  }
+
+  // ── Billing gate: check start_crawl limit ──
+  const tenantId = req.headers.get('x-tenant-id') ?? (site as Record<string, unknown>)['tenant_id'] as string | undefined;
+  if (tenantId) {
+    const currentPeriod = () => {
+      const now = new Date();
+      return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+    };
+    const billingDb: UsageDb = {
+      countSites:  async (tid) => { const { count } = await db.from('sites').select('id', { count: 'exact', head: true }).eq('tenant_id', tid); return count ?? 0; },
+      countCrawls: async (tid) => { const start = `${currentPeriod()}-01T00:00:00Z`; const { count } = await db.from('jobs').select('id', { count: 'exact', head: true }).eq('tenant_id', tid).gte('created_at', start); return count ?? 0; },
+      countFixes:  async (tid) => { const start = `${currentPeriod()}-01T00:00:00Z`; const { count } = await db.from('action_queue').select('id', { count: 'exact', head: true }).eq('tenant_id', tid).eq('execution_status', 'deployed').gte('updated_at', start); return count ?? 0; },
+      getTenantPlan: async (tid) => { const { data } = await db.from('tenants').select('plan_tier, billing_status').eq('id', tid).maybeSingle(); if (!data) return null; return { tier: (data.plan_tier as string) ?? 'starter', billing_status: (data.billing_status as string) ?? 'active' } as { tier: 'starter' | 'pro' | 'agency' | 'enterprise'; billing_status: 'active' | 'past_due' | 'canceled' | 'trialing' }; },
+    };
+    const gate = await checkBillingGate(tenantId, 'start_crawl', billingDb);
+    if (!gate.allowed) {
+      return NextResponse.json({ error: gate.reason, upgrade_required: gate.upgrade_required }, { status: 403 });
+    }
   }
 
   let body: Record<string, unknown> = {};

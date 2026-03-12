@@ -11,6 +11,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { applyFix, type ApplyResult, type ApprovedItem, type ApplyDeps } from '../../../../../../tools/apply/apply_engine.js';
 import { applyFix as shopifyApplyFix } from '../../../../../../packages/adapters/shopify/src/index.js';
+import { checkBillingGate } from '../../../../../../tools/billing/billing_gate.js';
+import type { UsageDb } from '../../../../../../tools/billing/usage_tracker.js';
 
 function getDb() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? '';
@@ -103,6 +105,24 @@ export async function POST(
 
   if (!site) {
     return NextResponse.json({ error: 'Site not found or access denied' }, { status: 404 });
+  }
+
+  // ── Billing gate: check apply_fix limit ──
+  {
+    const currentPeriod = () => {
+      const now = new Date();
+      return `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}`;
+    };
+    const billingDb: UsageDb = {
+      countSites:  async (tid) => { const { count } = await db.from('sites').select('id', { count: 'exact', head: true }).eq('tenant_id', tid); return count ?? 0; },
+      countCrawls: async (tid) => { const start = `${currentPeriod()}-01T00:00:00Z`; const { count } = await db.from('jobs').select('id', { count: 'exact', head: true }).eq('tenant_id', tid).gte('created_at', start); return count ?? 0; },
+      countFixes:  async (tid) => { const start = `${currentPeriod()}-01T00:00:00Z`; const { count } = await db.from('action_queue').select('id', { count: 'exact', head: true }).eq('tenant_id', tid).eq('execution_status', 'deployed').gte('updated_at', start); return count ?? 0; },
+      getTenantPlan: async (tid) => { const { data: t } = await db.from('tenants').select('plan_tier, billing_status').eq('id', tid).maybeSingle(); if (!t) return null; return { tier: (t.plan_tier as string) ?? 'starter', billing_status: (t.billing_status as string) ?? 'active' } as { tier: 'starter' | 'pro' | 'agency' | 'enterprise'; billing_status: 'active' | 'past_due' | 'canceled' | 'trialing' }; },
+    };
+    const gate = await checkBillingGate(tenantId, 'apply_fix', billingDb);
+    if (!gate.allowed) {
+      return NextResponse.json({ error: gate.reason, upgrade_required: gate.upgrade_required }, { status: 403 });
+    }
   }
 
   // Parse body
