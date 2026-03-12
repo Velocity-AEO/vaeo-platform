@@ -56,11 +56,12 @@ describe('getHealthTrend', () => {
   });
 
   it('direction=improving when last score > first + 5', async () => {
+    // Use days:60 to avoid boundary sensitivity with fixed dates
     const db = makeDb({
       site_health_scores: [makeScore(60, '2026-02-10'), makeScore(80, '2026-03-10')],
       action_queue: [],
     });
-    const r = await getHealthTrend({ site_id: 's1' }, db);
+    const r = await getHealthTrend({ site_id: 's1', days: 60 }, db);
     assert.equal(r.direction, 'improving');
   });
 
@@ -69,7 +70,7 @@ describe('getHealthTrend', () => {
       site_health_scores: [makeScore(80, '2026-02-10'), makeScore(60, '2026-03-10')],
       action_queue: [],
     });
-    const r = await getHealthTrend({ site_id: 's1' }, db);
+    const r = await getHealthTrend({ site_id: 's1', days: 60 }, db);
     assert.equal(r.direction, 'declining');
   });
 
@@ -78,7 +79,7 @@ describe('getHealthTrend', () => {
       site_health_scores: [makeScore(70, '2026-02-10'), makeScore(73, '2026-03-10')],
       action_queue: [],
     });
-    const r = await getHealthTrend({ site_id: 's1' }, db);
+    const r = await getHealthTrend({ site_id: 's1', days: 60 }, db);
     assert.equal(r.direction, 'stable');
   });
 
