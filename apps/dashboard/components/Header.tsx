@@ -21,6 +21,7 @@ const NAV = [
   { href: '/accessibility', label: 'Accessibility'  },
   { href: '/environment',   label: 'App Environment' },
   { href: '/native',        label: 'Native'          },
+  { href: '/heavyweight/case-study/demo', label: 'Case Study' },
   { href: '/onboarding',    label: 'Connect Site'   },
   { href: '/billing',    label: 'Billing'        },
   { href: '/debug',      label: 'Debug'          },
