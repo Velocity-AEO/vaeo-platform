@@ -210,6 +210,8 @@ export default function ClientDashboard() {
   return (
     <div className="space-y-8 px-4 py-6 md:px-6 w-full max-w-7xl mx-auto">
 
+      <POVDisclaimer />
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
         <div>
