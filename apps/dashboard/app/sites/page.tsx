@@ -33,13 +33,14 @@ export default async function SitesPage() {
               <th className="px-5 py-3 font-medium">Added</th>
               <th className="px-5 py-3 font-medium">Report</th>
               <th className="px-5 py-3 font-medium">Vehicle</th>
+              <th className="px-5 py-3 font-medium">Apps</th>
               <th className="px-5 py-3 font-medium">GSC</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {sites.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-5 py-8 text-center text-slate-400 text-xs">
+                <td colSpan={10} className="px-5 py-8 text-center text-slate-400 text-xs">
                   No sites registered.
                 </td>
               </tr>
@@ -82,6 +83,11 @@ export default async function SitesPage() {
                 <td className="px-5 py-3">
                   <Link href={`/vehicle/${s.site_id}`} className="text-blue-600 hover:underline text-xs font-medium">
                     Vehicle
+                  </Link>
+                </td>
+                <td className="px-5 py-3">
+                  <Link href={`/apps/${s.site_id}`} className="text-blue-600 hover:underline text-xs font-medium">
+                    App Tracker
                   </Link>
                 </td>
                 <td className="px-5 py-3">
