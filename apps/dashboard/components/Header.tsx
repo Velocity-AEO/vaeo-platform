@@ -27,6 +27,7 @@ const NAV = [
   { href: '/live-run',                  label: 'Live Run'    },
   { href: '/onboarding',    label: 'Connect Site'   },
   { href: '/billing',    label: 'Billing'        },
+  { href: '/qa',         label: 'QA'             },
   { href: '/debug',      label: 'Debug'          },
 ];
 
