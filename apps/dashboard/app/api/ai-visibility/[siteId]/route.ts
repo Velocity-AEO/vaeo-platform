@@ -2,6 +2,12 @@ import { NextResponse } from 'next/server';
 import { computeAIVisibilityScore, computeScoreHistory, type AICitationSummary } from '../../../../../../../tools/ai-visibility/visibility_score.js';
 import { analyzeCompetitorGap, getTopOpportunities } from '../../../../../../../tools/ai-visibility/competitor_gap.js';
 import { simulateSchemaOpportunities } from '../../../../../../../tools/ai-visibility/schema_opportunity.js';
+import { generateAIVisibilityReport } from '../../../../../../../tools/ai-visibility/ai_visibility_orchestrator.js';
+
+function deriveBrandName(domain: string): string {
+  const base = (domain ?? '').replace(/\.(com|net|org|io|co|shop|store).*$/, '');
+  return base.split(/[-_.]/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+}
 
 // ── Mock queries ─────────────────────────────────────────────────────────────
 
@@ -84,6 +90,10 @@ export async function GET(
     'Add HowTo schema to how-to content for step-by-step AI citations',
   ].filter(Boolean);
 
+  // Orchestrator report
+  const brand_name = deriveBrandName(siteId);
+  const ai_report  = await generateAIVisibilityReport(siteId, domain, brand_name);
+
   return NextResponse.json({
     score: currentScore,
     history: history.map((h) => ({ date: h.computed_at, score: h.score })),
@@ -96,6 +106,7 @@ export async function GET(
       product: { rate: 0.35, checked: 20, cited: 7 },
       informational: { rate: 0.2, checked: 15, cited: 3 },
     },
+    ai_report,
   }, {
     headers: { 'Cache-Control': 'no-store' },
   });
