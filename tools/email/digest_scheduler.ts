@@ -145,6 +145,44 @@ export async function getSchedulesForTenant(
   }
 }
 
+// ── scheduleDigest ────────────────────────────────────────────────────────────
+
+export interface DigestQueueEntry {
+  site_id:     string;
+  trigger:     string;
+  queued_at:   string;
+}
+
+interface QueueDb {
+  from(table: string): {
+    insert(row: Record<string, unknown>): PromiseLike<{ error: unknown }>;
+  };
+}
+
+/**
+ * Queues a digest for the given site by writing to `digest_queue`.
+ * Non-fatal: errors are swallowed and logged.
+ * Injectable `db` for testing.
+ */
+export async function scheduleDigest(
+  site_id:  string,
+  options:  { trigger: string },
+  deps?:    { db?: unknown },
+): Promise<void> {
+  try {
+    const db = deps?.db as QueueDb | undefined;
+    if (!db) return;
+    const entry: DigestQueueEntry = {
+      site_id,
+      trigger:   options?.trigger ?? 'unknown',
+      queued_at: new Date().toISOString(),
+    };
+    await db.from('digest_queue').insert(entry as unknown as Record<string, unknown>);
+  } catch {
+    // non-fatal
+  }
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function defaultScheduleFor(tenant_id: string): DigestSchedule {

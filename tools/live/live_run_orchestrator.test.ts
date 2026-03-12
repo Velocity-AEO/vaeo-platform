@@ -229,3 +229,55 @@ describe('runLiveProduction — health', () => {
     assert.equal(result.health, null);
   });
 });
+
+// ── Digest trigger ────────────────────────────────────────────────────────────
+
+describe('runLiveProduction — digest trigger', () => {
+  it('calls scheduleDigest after successful live run', async () => {
+    const called: string[] = [];
+    const result = await runLiveProduction(target(), mockDeps({
+      scheduleDigest: async (site_id) => { called.push(site_id); },
+    }));
+    assert.equal(result.state.phase, 'complete');
+    assert.ok(called.includes('site_1'));
+  });
+
+  it('calls scheduleDigest with trigger=live_run', async () => {
+    const triggers: string[] = [];
+    await runLiveProduction(target(), mockDeps({
+      scheduleDigest: async (_sid, opts) => { triggers.push(opts.trigger); },
+    }));
+    assert.ok(triggers.includes('live_run'));
+  });
+
+  it('calls scheduleDigest after partial/failed live run', async () => {
+    const called: string[] = [];
+    await runLiveProduction(target(), mockDeps({
+      discoverPages: async () => { throw new Error('crawl fail'); },
+      scheduleDigest: async (site_id) => { called.push(site_id); },
+    }));
+    assert.ok(called.includes('site_1'));
+  });
+
+  it('digest failure does not throw or abort the run', async () => {
+    const result = await runLiveProduction(target(), mockDeps({
+      scheduleDigest: async () => { throw new Error('digest boom'); },
+    }));
+    assert.equal(result.state.phase, 'complete');
+  });
+
+  it('data_source_summary is included in live run result', async () => {
+    const result = await runLiveProduction(target(), mockDeps());
+    assert.ok(result.data_source_summary !== undefined);
+    assert.ok(typeof result.data_source_summary!.total_fixes === 'number');
+  });
+
+  it('live run result includes fix count (success_count)', async () => {
+    const result = await runLiveProduction(target(), mockDeps());
+    assert.equal(result.fixes.success_count, 2);
+  });
+
+  it('never throws when deps are all undefined', async () => {
+    await assert.doesNotReject(() => runLiveProduction(target(), {}));
+  });
+});

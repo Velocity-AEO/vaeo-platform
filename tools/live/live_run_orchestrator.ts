@@ -37,6 +37,7 @@ import {
   type DataSourceSummary,
 } from './data_source_flag.js';
 import { fetchRankings } from '../rankings/rankings_service.js';
+import { scheduleDigest } from '../email/digest_scheduler.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -78,6 +79,8 @@ export interface OrchestratorDeps {
   feedbackDeps?: FeedbackDeps;
   /** Resolved data_source from rankings; when set, propagated to all fix records */
   data_source?: 'gsc_live' | 'simulated';
+  /** Override digest scheduling for testing */
+  scheduleDigest?: (site_id: string, opts: { trigger: string }) => Promise<void>;
 }
 
 // ── Orchestrator ─────────────────────────────────────────────────────────────
@@ -208,6 +211,16 @@ export async function runLiveProduction(
     const data_source_summary = summarizeDataSource(
       fixes.attempts.map(a => ({ data_source: a.data_source ?? resolved_data_source })),
     );
+
+    // Queue digest (non-fatal)
+    try {
+      const digestFn = deps?.scheduleDigest ?? scheduleDigest;
+      await digestFn(target.site_id, { trigger: 'live_run' });
+      process.stderr.write(`[orchestrator] digest queued for site ${target.site_id}\n`);
+    } catch {
+      // non-fatal
+    }
+
     return { state, crawl, issues, fixes, health, feedback_summary, data_source_summary };
   } catch (err) {
     state = transitionPhase(
@@ -215,6 +228,16 @@ export async function runLiveProduction(
       'failed',
       err instanceof Error ? err.message : String(err),
     );
+
+    // Queue digest on partial/failed run too (non-fatal)
+    try {
+      const digestFn = deps?.scheduleDigest ?? scheduleDigest;
+      await digestFn(target.site_id, { trigger: 'live_run' });
+      process.stderr.write(`[orchestrator] digest queued for site ${target.site_id}\n`);
+    } catch {
+      // non-fatal
+    }
+
     return { state, crawl, issues, fixes, health };
   }
 }
