@@ -482,3 +482,87 @@ describe('applyBatch', () => {
     assert.equal(result.results.length, 0);
   });
 });
+
+// ── Timestamp intercept ───────────────────────────────────────────────────────
+
+describe('applyFix — timestamp intercept', () => {
+  function makeTimestampItem(overrides: Partial<ApprovedItem> = {}): ApprovedItem {
+    return makeItem({
+      issue_type: 'TIMESTAMP_MISSING',
+      proposed_fix: { html_url: 'https://example.com/pages/about' },
+      ...overrides,
+    });
+  }
+
+  const FAKE_FIXES = [
+    { type: 'inject_jsonld_date_modified' as const, new_value: '2026-03-11T12:00:00Z', target: 'jsonld' as const },
+    { type: 'inject_og_modified_time' as const, new_value: '2026-03-11T12:00:00Z', target: 'og' as const },
+  ];
+
+  it('calls timestampApply dep for TIMESTAMP_MISSING, not shopifyApplyFix', async () => {
+    let shopifyCalled = false;
+    let timestampCalled = false;
+    const deps = makeDeps({
+      shopifyApplyFix: async (req) => {
+        shopifyCalled = true;
+        return { action_id: req.action_id, success: true, fix_type: req.fix_type, sandbox: false };
+      },
+      timestampApply: async () => {
+        timestampCalled = true;
+        return { success: true, timestamp_fixes: FAKE_FIXES };
+      },
+    });
+    await applyFix(makeTimestampItem(), deps);
+    assert.ok(timestampCalled, 'timestampApply should have been called');
+    assert.ok(!shopifyCalled, 'shopifyApplyFix should NOT have been called');
+  });
+
+  it('timestampApply success → markDeployed + log + timestamp_fixes in result', async () => {
+    const deps = makeDeps({
+      timestampApply: async () => ({ success: true, timestamp_fixes: FAKE_FIXES }),
+    });
+    const result = await applyFix(makeTimestampItem(), deps);
+    assert.ok(result.success);
+    assert.deepStrictEqual(result.timestamp_fixes, FAKE_FIXES);
+    const marks = (deps as unknown as { _marks: Array<{ type: string }> })._marks;
+    assert.equal(marks[0]?.type, 'deployed');
+    const logs = (deps as unknown as { _logs: Array<{ stage: string }> })._logs;
+    assert.ok(logs.some((l) => l.stage === 'apply:deployed'));
+  });
+
+  it('timestampApply failure → markFailed + log + error in result', async () => {
+    const deps = makeDeps({
+      timestampApply: async () => ({ success: false, error: 'fetch failed' }),
+    });
+    const result = await applyFix(makeTimestampItem(), deps);
+    assert.ok(!result.success);
+    assert.ok(result.error?.includes('fetch failed'));
+    const marks = (deps as unknown as { _marks: Array<{ type: string }> })._marks;
+    assert.equal(marks[0]?.type, 'failed');
+  });
+
+  it('falls through to shopifyApplyFix when timestampApply not provided', async () => {
+    let shopifyCalled = false;
+    const deps = makeDeps({
+      shopifyApplyFix: async (req) => {
+        shopifyCalled = true;
+        return { action_id: req.action_id, success: true, fix_type: req.fix_type, sandbox: false };
+      },
+      timestampApply: undefined,
+    });
+    const result = await applyFix(makeTimestampItem(), deps);
+    assert.ok(shopifyCalled, 'should fall through to shopifyApplyFix');
+    assert.ok(result.success);
+  });
+
+  it('also routes TIMESTAMP_STALE, DATE_MODIFIED_MISSING, DATE_MODIFIED_STALE', async () => {
+    for (const issueType of ['TIMESTAMP_STALE', 'DATE_MODIFIED_MISSING', 'DATE_MODIFIED_STALE']) {
+      let timestampCalled = false;
+      const deps = makeDeps({
+        timestampApply: async () => { timestampCalled = true; return { success: true }; },
+      });
+      await applyFix(makeTimestampItem({ issue_type: issueType }), deps);
+      assert.ok(timestampCalled, `${issueType} should call timestampApply`);
+    }
+  });
+});

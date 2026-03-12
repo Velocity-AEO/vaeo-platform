@@ -18,6 +18,7 @@
  */
 
 import type { ShopifyFixRequest, ShopifyFixResult } from '../../packages/adapters/shopify/src/index.js';
+import type { TimestampFix } from '../optimize/timestamp_plan.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -43,6 +44,8 @@ export interface ApplyResult {
   error?:    string;
   /** Captured before-state for rollback. */
   before_value?: Record<string, unknown>;
+  /** Timestamp fixes applied to the page (timestamp pipeline only). */
+  timestamp_fixes?: TimestampFix[];
 }
 
 export interface ApplyBatchResult {
@@ -94,6 +97,15 @@ export interface ApplyDeps {
     creds: { access_token: string; store_url: string },
   ) => Promise<{ success: boolean; action?: string; error?: string }>;
   /**
+   * Optional — timestamp fix pipeline (TIMESTAMP_MISSING, TIMESTAMP_STALE, etc.).
+   * Detects, plans, and applies dateModified/article:modified_time fixes.
+   * When absent, timestamp issues fall through to shopifyApplyFix.
+   */
+  timestampApply?: (
+    item:  ApprovedItem,
+    creds: { access_token: string; store_url: string },
+  ) => Promise<{ success: boolean; timestamp_fixes?: TimestampFix[]; error?: string }>;
+  /**
    * Optional — AEO fix pipeline (SPEAKABLE_MISSING, FAQ_OPPORTUNITY, etc.).
    * Generates and injects AEO schema into the Shopify theme.
    */
@@ -118,6 +130,14 @@ const AEO_ISSUE_TYPES = new Set([
   'ANSWER_BLOCK_OPPORTUNITY',
 ]);
 
+/** Timestamp issue types that bypass the Shopify adapter. */
+const TIMESTAMP_ISSUE_TYPES = new Set([
+  'TIMESTAMP_MISSING',
+  'TIMESTAMP_STALE',
+  'DATE_MODIFIED_MISSING',
+  'DATE_MODIFIED_STALE',
+]);
+
 function isPerformanceIssue(issueType: string): boolean {
   return PERFORMANCE_ISSUE_TYPES.has(issueType);
 }
@@ -126,11 +146,17 @@ function isAEOIssue(issueType: string): boolean {
   return AEO_ISSUE_TYPES.has(issueType);
 }
 
-function mapIssueToFixType(issueType: string): ShopifyFixType | 'performance' | 'aeo' | null {
+function isTimestampIssue(issueType: string): boolean {
+  return TIMESTAMP_ISSUE_TYPES.has(issueType);
+}
+
+function mapIssueToFixType(issueType: string): ShopifyFixType | 'performance' | 'aeo' | 'timestamp' | null {
   // Performance issues are handled by a separate pipeline
   if (isPerformanceIssue(issueType)) return 'performance';
   // AEO issues are handled by the AEO pipeline
   if (isAEOIssue(issueType)) return 'aeo';
+  // Timestamp issues are handled by the timestamp pipeline
+  if (isTimestampIssue(issueType)) return 'timestamp';
   const lower = issueType.toLowerCase();
   if (lower.includes('title'))     return 'meta_title';
   if (lower.includes('meta') || lower.includes('desc')) return 'meta_description';
@@ -619,6 +645,38 @@ export async function applyFix(
       duration_ms: Date.now() - start,
     });
     return { action_id: item.id, success: false, fix_type: item.issue_type, error: errMsg };
+  }
+
+  // ── Timestamp intercept ──────────────────────────────────────────────────
+  if (fixType === 'timestamp') {
+    if (!deps.timestampApply) {
+      // No timestamp pipeline configured — fall through to shopifyApplyFix
+    } else {
+      const tr = await deps.timestampApply(item, creds);
+      if (tr.success) {
+        try { await deps.markDeployed(item.id); } catch { /* non-fatal */ }
+        deps.writeLog({
+          action_id:   item.id,
+          stage:       'apply:deployed',
+          status:      'ok',
+          url:         item.url,
+          field:       'timestamp',
+          duration_ms: Date.now() - start,
+        });
+        return { action_id: item.id, success: true, fix_type: item.issue_type, timestamp_fixes: tr.timestamp_fixes };
+      }
+      const errMsg = tr.error ?? 'Timestamp apply failed';
+      try { await deps.markFailed(item.id, errMsg); } catch { /* non-fatal */ }
+      deps.writeLog({
+        action_id:   item.id,
+        stage:       'apply:failed',
+        status:      'failed',
+        url:         item.url,
+        error:       errMsg,
+        duration_ms: Date.now() - start,
+      });
+      return { action_id: item.id, success: false, fix_type: item.issue_type, error: errMsg };
+    }
   }
 
   // Build Shopify fix request
