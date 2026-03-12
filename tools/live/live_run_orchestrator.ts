@@ -27,6 +27,11 @@ import {
   executeFixBatch as defaultExecuteFixBatch,
   type FixBatch,
 } from './live_fix_executor.js';
+import {
+  processFeedbackBatch,
+  type FeedbackSummary,
+  type FeedbackDeps,
+} from './feedback_loop.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -42,6 +47,7 @@ export interface LiveRunResult {
   issues:  IssueAggregation;
   fixes:   FixBatch;
   health:  SystemHealthReport | null;
+  feedback_summary?: FeedbackSummary;
 }
 
 export interface OrchestratorDeps {
@@ -63,6 +69,7 @@ export interface OrchestratorDeps {
     dry_run: boolean,
   ) => Promise<FixBatch>;
   runHealthMonitor?: () => Promise<SystemHealthReport>;
+  feedbackDeps?: FeedbackDeps;
 }
 
 // ── Orchestrator ─────────────────────────────────────────────────────────────
@@ -149,7 +156,17 @@ export async function runLiveProduction(
 
     // Phase 5: Learning
     state = transitionPhase(state, 'learning', 'Recording learnings');
-    // Non-fatal no-op for now
+    let feedback_summary: FeedbackSummary | undefined;
+    try {
+      feedback_summary = await processFeedbackBatch(
+        target.site_id,
+        state.run_id,
+        fixes,
+        deps?.feedbackDeps,
+      );
+    } catch {
+      // non-fatal
+    }
 
     // Phase 6: Complete
     state = transitionPhase(state, 'complete', 'Run complete');
@@ -163,7 +180,7 @@ export async function runLiveProduction(
       }
     }
 
-    return { state, crawl, issues, fixes, health };
+    return { state, crawl, issues, fixes, health, feedback_summary };
   } catch (err) {
     state = transitionPhase(
       state,
