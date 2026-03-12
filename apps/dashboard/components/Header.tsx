@@ -32,6 +32,7 @@ const NAV = [
   { href: '/debug',      label: 'Debug'          },
   { href: '/client/demo-store/value', label: 'Proof of Value' },
   { href: '/client/demo-store/suggestions', label: 'Suggestions' },
+  { href: '/client/demo-store/ai-visibility', label: 'AI Visibility' },
 ];
 
 export default function Header() {
