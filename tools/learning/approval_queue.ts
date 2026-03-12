@@ -11,18 +11,26 @@
  * Injectable DB client — never throws, returns result objects.
  */
 
+import {
+  evaluateForAutoApproval,
+  runAutoApprovalBatch,
+  type AutoApprovalConfig,
+} from './auto_approver.ts';
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface ApprovalQueueParams {
-  site_id?:          string;
-  action_queue_id?:  string;
-  learning_id?:      string;
-  issue_type?:       string;
-  url?:              string;
-  before_value?:     string;
-  proposed_value?:   string;
-  sandbox_result?:   Record<string, unknown>;
-  sandbox_status:    string;
+  site_id?:             string;
+  action_queue_id?:     string;
+  learning_id?:         string;
+  issue_type?:          string;
+  url?:                 string;
+  before_value?:        string;
+  proposed_value?:      string;
+  sandbox_result?:      Record<string, unknown>;
+  sandbox_status:       string;
+  autoApprove?:         boolean;
+  autoApprovalConfig?:  AutoApprovalConfig;
 }
 
 export interface ApprovalQueueItem {
@@ -101,6 +109,25 @@ export async function queueForApproval(
       status:          'pending',
     };
 
+    // Optional auto-approval evaluation
+    if (params.autoApprove && params.autoApprovalConfig && params.issue_type && params.url) {
+      const evalResult = await evaluateForAutoApproval(
+        {
+          id:           'pending',
+          url:          params.url,
+          issue_type:   params.issue_type,
+          proposed_fix: params.proposed_value ?? '',
+        },
+        params.autoApprovalConfig,
+        db,
+      );
+      if (evalResult.approved) {
+        row.status        = 'approved';
+        row.reviewer_note = `auto_approved=true; ${evalResult.reason}`;
+        row.reviewed_at   = evalResult.auto_approved_at;
+      }
+    }
+
     const { data, error } = await db
       .from('approval_queue')
       .insert(row)
@@ -136,6 +163,51 @@ export async function getApprovalQueue(
     return data ?? [];
   } catch {
     return [];
+  }
+}
+
+// ── processAutoApprovals ──────────────────────────────────────────────────────
+
+export interface ProcessAutoResult {
+  processed: number;
+  approved:  number;
+  skipped:   number;
+}
+
+/**
+ * Find all pending items in approval_queue for a site, run auto-approval
+ * evaluation, and update status='approved' for those that pass.
+ */
+export async function processAutoApprovals(
+  siteId: string,
+  config: AutoApprovalConfig,
+  db:     ApprovalDb,
+): Promise<ProcessAutoResult> {
+  try {
+    const pending = await getApprovalQueue(db, siteId);
+    if (!pending.length) return { processed: 0, approved: 0, skipped: 0 };
+
+    const items = pending.map((p) => ({
+      id:           p.id,
+      url:          p.url ?? '',
+      issue_type:   p.issue_type ?? '',
+      proposed_fix: p.proposed_value ?? '',
+    }));
+
+    const { approved: approvedList, skipped: skippedList } = await runAutoApprovalBatch(items, config, db);
+
+    // Persist approved statuses
+    for (const r of approvedList) {
+      await updateApprovalStatus(r.item_id, 'approved', `auto_approved=true; ${r.reason}`, db);
+    }
+
+    return {
+      processed: pending.length,
+      approved:  approvedList.length,
+      skipped:   skippedList.length,
+    };
+  } catch {
+    return { processed: 0, approved: 0, skipped: 0 };
   }
 }
 
