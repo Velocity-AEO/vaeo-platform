@@ -16,8 +16,9 @@ const NAV = [
   { href: '/jobs',       label: 'Jobs'           },
   { href: '/report',     label: 'Reports'        },
   { href: '/security',   label: 'Security'       },
-  { href: '/vehicle',    label: 'Vehicle Schema' },
-  { href: '/onboarding', label: 'Connect Site'   },
+  { href: '/vehicle',       label: 'Vehicle Schema' },
+  { href: '/localbusiness', label: 'Local SEO'      },
+  { href: '/onboarding',    label: 'Connect Site'   },
   { href: '/billing',    label: 'Billing'        },
 ];
 
