@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -90,6 +90,173 @@ function statusBadge(status: string) {
 
 // ── Main page ────────────────────────────────────────────────────────────────
 
+// ── Social Feed Types ─────────────────────────────────────────────────────────
+
+type FeedLayout = 'grid' | 'horizontal_scroll' | 'masonry';
+
+interface SocialFeedFormState {
+  feed_url: string;
+  display_count: number;
+  layout: FeedLayout;
+  columns: number;
+  show_caption: boolean;
+  show_platform_badge: boolean;
+  heading_text: string;
+  cache_duration_minutes: number;
+}
+
+const SF_DEFAULTS: SocialFeedFormState = {
+  feed_url: '',
+  display_count: 6,
+  layout: 'grid',
+  columns: 3,
+  show_caption: true,
+  show_platform_badge: true,
+  heading_text: 'Follow Us',
+  cache_duration_minutes: 30,
+};
+
+// ── Registry entry type ──────────────────────────────────────────────────────
+
+interface RegistryEntry {
+  component_type: string;
+  display_name: string;
+  description: string;
+  status: string;
+}
+
+// ── Shipping Bar section ──────────────────────────────────────────────────────
+
+interface SBConfig {
+  threshold_amount: number; currency_symbol: string;
+  message_below_threshold: string; message_at_threshold: string;
+  background_color: string; text_color: string;
+  bar_height_px: number; font_size_px: number;
+  show_progress_bar: boolean; progress_color: string;
+  position: 'top' | 'bottom'; sticky: boolean;
+  dismissible: boolean; animate_on_threshold: boolean;
+}
+const SB_DEFAULTS: SBConfig = {
+  threshold_amount: 50, currency_symbol: '$',
+  message_below_threshold: 'Add {remaining} more for FREE shipping!',
+  message_at_threshold: "🎉 You've unlocked free shipping!",
+  background_color: '#1a1a2e', text_color: '#ffffff',
+  bar_height_px: 44, font_size_px: 14, show_progress_bar: true,
+  progress_color: '#4ade80', position: 'top', sticky: true,
+  dismissible: false, animate_on_threshold: true,
+};
+
+function SBToggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <label className="flex items-center justify-between cursor-pointer select-none">
+      <span className="text-sm text-gray-700">{label}</span>
+      <button role="switch" aria-checked={checked} onClick={() => onChange(!checked)}
+        className={`relative w-10 h-5 rounded-full transition-colors ${checked ? 'bg-blue-600' : 'bg-slate-200'}`}>
+        <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${checked ? 'translate-x-5' : ''}`} />
+      </button>
+    </label>
+  );
+}
+
+function ShippingBarSection() {
+  const [cfg, setCfg]   = useState<SBConfig>({ ...SB_DEFAULTS });
+  const [sbStatus, setSbStatus] = useState<string>('');
+  const [sbSnippet, setSbSnippet] = useState<string>('');
+  const [sbBusy, setSbBusy] = useState(false);
+  const [sbMsg, setSbMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  const upd = <K extends keyof SBConfig>(k: K, v: SBConfig[K]) => setCfg((p) => ({ ...p, [k]: v }));
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const r = await fetch('/api/components/shipping-bar');
+        const d = await r.json() as { component?: { status: string } };
+        if (d.component) setSbStatus(d.component.status);
+      } catch { /* non-fatal */ }
+    })();
+  }, []);
+
+  async function sbPreview() {
+    setSbBusy(true); setSbSnippet('');
+    try {
+      const r = await fetch('/api/components/shipping-bar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ config: cfg, dry_run: true }) });
+      const d = await r.json() as { snippet_html?: string };
+      setSbSnippet(d.snippet_html ?? '');
+    } catch { setSbMsg({ text: 'Preview failed', ok: false }); }
+    finally { setSbBusy(false); }
+  }
+
+  async function sbDeploy() {
+    setSbBusy(true);
+    try {
+      const r = await fetch('/api/components/shipping-bar', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ config: cfg, dry_run: false }) });
+      const d = await r.json() as { component?: { status: string }; install_result?: { success: boolean } };
+      if (d.install_result?.success) { setSbStatus(d.component?.status ?? 'active'); setSbMsg({ text: 'Deployed successfully.', ok: true }); }
+      else { setSbMsg({ text: 'Deploy returned an error.', ok: false }); }
+    } catch { setSbMsg({ text: 'Deploy failed.', ok: false }); }
+    finally { setSbBusy(false); }
+  }
+
+  async function sbRemove() {
+    setSbBusy(true);
+    try {
+      await fetch('/api/components/shipping-bar', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      setSbStatus('disabled'); setSbSnippet(''); setSbMsg({ text: 'Removed.', ok: true });
+    } catch { setSbMsg({ text: 'Remove failed.', ok: false }); }
+    finally { setSbBusy(false); }
+  }
+
+  return (
+    <section className="bg-white border rounded-xl overflow-hidden">
+      <div className="px-6 py-4 border-b bg-slate-50 flex items-center gap-3">
+        <h2 className="text-lg font-semibold">Shipping Bar</h2>
+        {sbStatus && statusBadge(sbStatus)}
+      </div>
+      <div className="px-6 py-5 space-y-4">
+        <p className="text-xs text-slate-500">Components built and owned by VAEO. Installed directly into your store — no third-party apps.</p>
+        <div className="grid grid-cols-2 gap-4">
+          <div><label className="block text-xs font-medium text-gray-700 mb-1">Threshold ($)</label>
+            <input type="number" value={cfg.threshold_amount} onChange={(e) => upd('threshold_amount', Number(e.target.value))} className="w-full border rounded px-3 py-2 text-sm" min={0} /></div>
+          <div><label className="block text-xs font-medium text-gray-700 mb-1">Currency symbol</label>
+            <input type="text" value={cfg.currency_symbol} onChange={(e) => upd('currency_symbol', e.target.value)} className="w-full border rounded px-3 py-2 text-sm" maxLength={4} /></div>
+        </div>
+        <div><label className="block text-xs font-medium text-gray-700 mb-1">Message below threshold</label>
+          <input type="text" value={cfg.message_below_threshold} onChange={(e) => upd('message_below_threshold', e.target.value)} className="w-full border rounded px-3 py-2 text-sm" /></div>
+        <div><label className="block text-xs font-medium text-gray-700 mb-1">Message at threshold</label>
+          <input type="text" value={cfg.message_at_threshold} onChange={(e) => upd('message_at_threshold', e.target.value)} className="w-full border rounded px-3 py-2 text-sm" /></div>
+        <div className="grid grid-cols-3 gap-4">
+          {(['background_color', 'text_color', 'progress_color'] as const).map((k) => (
+            <div key={k}><label className="block text-xs font-medium text-gray-700 mb-1">{k.replace(/_/g, ' ')}</label>
+              <div className="flex items-center gap-2">
+                <input type="color" value={cfg[k]} onChange={(e) => upd(k, e.target.value)} className="w-8 h-8 border rounded cursor-pointer" />
+                <input type="text" value={cfg[k]} onChange={(e) => upd(k, e.target.value)} className="flex-1 border rounded px-2 py-1 text-xs font-mono" maxLength={7} />
+              </div></div>
+          ))}
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-medium text-gray-700">Position:</span>
+          {(['top', 'bottom'] as const).map((p) => (
+            <button key={p} onClick={() => upd('position', p)} className={`px-3 py-1 rounded text-sm border ${cfg.position === p ? 'bg-slate-800 text-white' : 'bg-white text-slate-600 border-slate-200'}`}>{p.charAt(0).toUpperCase() + p.slice(1)}</button>
+          ))}
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <SBToggle label="Sticky"               checked={cfg.sticky}              onChange={(v) => upd('sticky', v)} />
+          <SBToggle label="Show progress bar"    checked={cfg.show_progress_bar}   onChange={(v) => upd('show_progress_bar', v)} />
+          <SBToggle label="Dismissible"          checked={cfg.dismissible}         onChange={(v) => upd('dismissible', v)} />
+          <SBToggle label="Animate on threshold" checked={cfg.animate_on_threshold} onChange={(v) => upd('animate_on_threshold', v)} />
+        </div>
+        {sbMsg && <div className={`rounded px-3 py-2 text-sm border ${sbMsg.ok ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-200 text-red-800'}`}>{sbMsg.text} <button className="ml-2 opacity-60" onClick={() => setSbMsg(null)}>×</button></div>}
+      </div>
+      <div className="px-6 py-4 border-t bg-slate-50 flex items-center gap-3 flex-wrap">
+        <button onClick={sbPreview} disabled={sbBusy} className="px-4 py-2 border rounded text-sm font-medium hover:bg-gray-50 disabled:opacity-50">{sbBusy ? 'Working…' : 'Preview Snippet'}</button>
+        <button onClick={sbDeploy} disabled={sbBusy} className="px-4 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 disabled:opacity-50">Deploy to Store</button>
+        {sbStatus === 'active' && <button onClick={sbRemove} disabled={sbBusy} className="px-4 py-2 bg-red-600 text-white rounded text-sm font-medium hover:bg-red-700 disabled:opacity-50 ml-auto">Remove</button>}
+      </div>
+      {sbSnippet && <div className="px-6 pb-5"><div className="text-xs font-medium text-gray-600 mb-2">Generated Liquid snippet:</div><pre className="bg-gray-900 text-green-400 p-3 rounded text-[10px] overflow-x-auto whitespace-pre-wrap font-mono max-h-56">{sbSnippet}</pre></div>}
+    </section>
+  );
+}
+
 export default function ComponentsPage() {
   const [config, setConfig] = useState<EmailCaptureFormState>({ ...DEFAULTS });
   const [deploying, setDeploying] = useState(false);
@@ -97,6 +264,45 @@ export default function ComponentsPage() {
   const [result, setResult] = useState<DeployResult | null>(null);
   const [previewHtml, setPreviewHtml] = useState('');
   const [showPreview, setShowPreview] = useState(false);
+
+  // Social Feed state
+  const [sfConfig, setSfConfig] = useState<SocialFeedFormState>({ ...SF_DEFAULTS });
+  const [sfDeploying, setSfDeploying] = useState(false);
+  const [sfResult, setSfResult] = useState<DeployResult | null>(null);
+
+  // Registry state
+  const [registry, setRegistry] = useState<RegistryEntry[]>([]);
+  const [registryLoading, setRegistryLoading] = useState(true);
+
+  function updateSf<K extends keyof SocialFeedFormState>(key: K, value: SocialFeedFormState[K]) {
+    setSfConfig((prev) => ({ ...prev, [key]: value }));
+  }
+
+  const loadRegistry = useCallback(async () => {
+    try {
+      const res = await fetch('/api/components');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data.components)) setRegistry(data.components);
+    } catch { /* non-fatal */ }
+    setRegistryLoading(false);
+  }, []);
+
+  useEffect(() => { loadRegistry(); }, [loadRegistry]);
+
+  async function handleSfDeploy(dry_run: boolean) {
+    setSfDeploying(true);
+    try {
+      const res = await fetch('/api/components', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ component_type: 'social_feed', config: sfConfig, dry_run }),
+      });
+      const data: DeployResult = await res.json();
+      setSfResult(data);
+    } catch { /* non-fatal */ }
+    setSfDeploying(false);
+  }
 
   function update<K extends keyof EmailCaptureFormState>(key: K, value: EmailCaptureFormState[K]) {
     setConfig((prev) => ({ ...prev, [key]: value }));
@@ -154,6 +360,9 @@ export default function ComponentsPage() {
         <h1 className="text-2xl font-bold">Components</h1>
         <p className="text-gray-500 text-sm mt-1">Deploy and manage VAEO native components</p>
       </div>
+
+      {/* ── Shipping Bar ──────────────────────────────────────────── */}
+      <ShippingBarSection />
 
       {/* ── Email Capture Popup ────────────────────────────────────── */}
       <section>
@@ -508,6 +717,204 @@ export default function ComponentsPage() {
               </div>
             </div>
           </div>
+        </div>
+      </section>
+
+      {/* ── Social Feed Widget ──────────────────────────────────────── */}
+      <section>
+        <div className="flex items-center gap-3 mb-4">
+          <h2 className="text-lg font-semibold">Social Feed Widget</h2>
+          {sfResult && statusBadge(sfResult.component.status)}
+        </div>
+
+        <div className="grid grid-cols-3 gap-6">
+          <div className="col-span-2 bg-white border rounded-lg p-6 space-y-5">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Feed URL</label>
+                <input
+                  type="text"
+                  value={sfConfig.feed_url}
+                  onChange={(e) => updateSf('feed_url', e.target.value)}
+                  className="w-full border rounded px-3 py-2 text-sm"
+                  placeholder="https://feed.example.com/rss"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Heading Text</label>
+                <input
+                  type="text"
+                  value={sfConfig.heading_text}
+                  onChange={(e) => updateSf('heading_text', e.target.value)}
+                  className="w-full border rounded px-3 py-2 text-sm"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-4 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Layout</label>
+                <select
+                  value={sfConfig.layout}
+                  onChange={(e) => updateSf('layout', e.target.value as FeedLayout)}
+                  className="w-full border rounded px-3 py-2 text-sm"
+                >
+                  <option value="grid">Grid</option>
+                  <option value="horizontal_scroll">Horizontal Scroll</option>
+                  <option value="masonry">Masonry</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Display Count</label>
+                <input
+                  type="number"
+                  value={sfConfig.display_count}
+                  onChange={(e) => updateSf('display_count', Number(e.target.value))}
+                  className="w-full border rounded px-3 py-2 text-sm"
+                  min={1} max={24}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Columns</label>
+                <input
+                  type="number"
+                  value={sfConfig.columns}
+                  onChange={(e) => updateSf('columns', Number(e.target.value))}
+                  className="w-full border rounded px-3 py-2 text-sm"
+                  min={1} max={6}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Cache (min)</label>
+                <input
+                  type="number"
+                  value={sfConfig.cache_duration_minutes}
+                  onChange={(e) => updateSf('cache_duration_minutes', Number(e.target.value))}
+                  className="w-full border rounded px-3 py-2 text-sm"
+                  min={1} max={1440}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input type="checkbox" checked={sfConfig.show_caption} onChange={(e) => updateSf('show_caption', e.target.checked)} />
+                Show Captions
+              </label>
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input type="checkbox" checked={sfConfig.show_platform_badge} onChange={(e) => updateSf('show_platform_badge', e.target.checked)} />
+                Show Platform Badge
+              </label>
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button
+                onClick={() => handleSfDeploy(true)}
+                disabled={sfDeploying || !sfConfig.feed_url}
+                className="px-4 py-2 border rounded text-sm font-medium hover:bg-gray-50 disabled:opacity-50"
+              >
+                {sfDeploying ? 'Generating...' : 'Preview'}
+              </button>
+              <button
+                onClick={() => handleSfDeploy(false)}
+                disabled={sfDeploying || !sfConfig.feed_url}
+                className="px-4 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+              >
+                {sfDeploying ? 'Deploying...' : 'Deploy to Store'}
+              </button>
+              <button
+                onClick={() => setSfConfig({ ...SF_DEFAULTS })}
+                className="px-4 py-2 text-sm text-gray-500 hover:text-gray-700"
+              >
+                Reset Defaults
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            {sfResult && (
+              <div className="bg-white border rounded-lg p-4 space-y-2">
+                <h3 className="text-sm font-semibold text-gray-700">Deploy Status</h3>
+                <div className="flex items-center gap-2">
+                  {statusBadge(sfResult.component.status)}
+                  <span className="text-xs text-gray-500">{sfResult.component.component_id}</span>
+                </div>
+                <p className="text-xs text-gray-600">
+                  {sfResult.install_result.success
+                    ? sfResult.install_result.message ?? 'Deployed successfully'
+                    : sfResult.install_result.error ?? 'Deploy failed'}
+                </p>
+              </div>
+            )}
+
+            <div className="bg-white border rounded-lg p-4">
+              <h3 className="text-sm font-semibold text-gray-700 mb-3">Preview</h3>
+              <div className="bg-gray-50 rounded p-4 text-center">
+                <p className="text-sm font-semibold mb-3">{sfConfig.heading_text}</p>
+                <div
+                  className="gap-2"
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: `repeat(${sfConfig.columns}, 1fr)`,
+                  }}
+                >
+                  {Array.from({ length: Math.min(sfConfig.display_count, 9) }).map((_, i) => (
+                    <div key={i} className="bg-gray-200 rounded aspect-square flex items-center justify-center text-xs text-gray-400">
+                      {i + 1}
+                    </div>
+                  ))}
+                </div>
+                {sfConfig.show_caption && (
+                  <p className="text-[10px] text-gray-400 mt-2">Captions will appear below each item</p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── Component Registry ──────────────────────────────────────── */}
+      <section>
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-lg font-semibold">Component Registry</h2>
+            <p className="text-gray-500 text-xs mt-0.5">All available VAEO native components</p>
+          </div>
+          <button
+            onClick={loadRegistry}
+            className="px-3 py-1.5 border rounded text-xs font-medium hover:bg-gray-50"
+          >
+            Refresh
+          </button>
+        </div>
+
+        <div className="bg-white border rounded-lg overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b">
+              <tr>
+                <th className="text-left px-4 py-2 font-medium text-gray-600">Component</th>
+                <th className="text-left px-4 py-2 font-medium text-gray-600">Type</th>
+                <th className="text-left px-4 py-2 font-medium text-gray-600">Description</th>
+                <th className="text-left px-4 py-2 font-medium text-gray-600">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {registryLoading ? (
+                <tr><td colSpan={4} className="px-4 py-6 text-center text-gray-400">Loading registry...</td></tr>
+              ) : registry.length === 0 ? (
+                <tr><td colSpan={4} className="px-4 py-6 text-center text-gray-400">No components found</td></tr>
+              ) : (
+                registry.map((entry) => (
+                  <tr key={entry.component_type} className="hover:bg-gray-50">
+                    <td className="px-4 py-3 font-medium">{entry.display_name}</td>
+                    <td className="px-4 py-3 text-xs font-mono text-gray-500">{entry.component_type}</td>
+                    <td className="px-4 py-3 text-gray-600">{entry.description}</td>
+                    <td className="px-4 py-3">{statusBadge(entry.status)}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
       </section>
     </div>
