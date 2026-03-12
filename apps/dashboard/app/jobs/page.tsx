@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import UpgradePrompt from '@/components/UpgradePrompt';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -100,10 +101,16 @@ export default function JobsPage() {
   const [error,      setError]      = useState<string | null>(null);
   const [countdown,  setCountdown]  = useState(REFRESH_INTERVAL / 1000);
   const [cancelling, setCancelling] = useState(false);
+  const [gated,      setGated]      = useState(false);
 
   const fetchStatus = useCallback(async () => {
     try {
       const res = await fetch(`/api/jobs/status?tenant_id=${TENANT_ID}&limit=20`);
+      if (res.status === 403) {
+        setGated(true);
+        setLoading(false);
+        return;
+      }
       if (!res.ok) throw new Error(`API error ${res.status}`);
       const json = await res.json() as JobStatusResponse;
       setData(json);
@@ -150,6 +157,19 @@ export default function JobsPage() {
   }
 
   const summary = data?.summary ?? { queued: 0, running: 0, done: 0, failed: 0 };
+
+  if (gated) {
+    return (
+      <div className="mx-auto max-w-screen-xl px-6 py-8 space-y-6">
+        <h1 className="text-2xl font-bold text-slate-900">Job Queue</h1>
+        <UpgradePrompt
+          feature="Multi-site job orchestration"
+          current_plan="Starter"
+          required_plan="Agency"
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-screen-xl px-6 py-8 space-y-6">
