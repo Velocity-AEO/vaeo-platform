@@ -23,6 +23,7 @@ const NAV = [
   { href: '/native',        label: 'Native'          },
   { href: '/onboarding',    label: 'Connect Site'   },
   { href: '/billing',    label: 'Billing'        },
+  { href: '/debug',      label: 'Debug'          },
 ];
 
 export default function Header() {
