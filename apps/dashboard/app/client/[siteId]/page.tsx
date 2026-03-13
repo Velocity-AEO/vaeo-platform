@@ -10,6 +10,7 @@ import type { RankingSnapshot, RankingEntry } from '@/../tools/rankings/ranking_
 import type { FixHistoryPage, FixHistoryEntry } from '@/../tools/stats/fix_history';
 import POVDisclaimer from '@/components/POVDisclaimer';
 import SimulatedDataBanner from '@/components/SimulatedDataBanner';
+import RankingsTrendPanel from '@/components/RankingsTrendPanel';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -351,6 +352,9 @@ export default function ClientDashboard() {
           <span className="flex items-center gap-1"><span className="text-slate-400 font-bold">■</span> 11+</span>
         </div>
       </section>
+
+      {/* Keyword movement trending */}
+      <RankingsTrendPanel siteId={siteId} />
 
       {/* Health score trend chart */}
       <section>
