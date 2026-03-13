@@ -210,3 +210,76 @@ export async function dispatchDigestEmail(
 async function defaultSendHtmlEmail(
   _to: string, _subject: string, _html: string, _text: string, _from?: string,
 ): Promise<void> {}
+
+// ── dispatchGraphStaleNotification ──────────────────────────────────────────
+
+export async function dispatchGraphStaleNotification(
+  domain: string,
+  site_id: string,
+  hours: number,
+  admin_email: string,
+  deps?: NotificationDispatchDeps,
+): Promise<NotificationDispatchResult> {
+  try {
+    const payload: FixNotificationPayload = {
+      event: 'link_graph_stale',
+      site_id,
+      domain,
+      triggered_at: new Date().toISOString(),
+    };
+    const config: NotificationDispatchConfig = {
+      site_id,
+      user_email: admin_email,
+      domain,
+      digest_enabled: false,
+      immediate_alerts_enabled: true,
+    };
+    return await dispatchFixNotification(payload, config, deps, {
+      fix_id: `link_graph_stale_${site_id}`,
+    });
+  } catch {
+    return {
+      event: 'link_graph_stale',
+      dispatched: false,
+      method: 'skipped',
+      reason: 'dispatch error',
+    };
+  }
+}
+
+// ── dispatchGraphIntegrityNotification ──────────────────────────────────────
+
+export async function dispatchGraphIntegrityNotification(
+  domain: string,
+  site_id: string,
+  critical_issues: string[],
+  admin_email: string,
+  deps?: NotificationDispatchDeps,
+): Promise<NotificationDispatchResult> {
+  try {
+    const payload: FixNotificationPayload = {
+      event: 'link_graph_integrity_fail',
+      site_id,
+      domain,
+      fix_summary: critical_issues,
+      triggered_at: new Date().toISOString(),
+    };
+    const config: NotificationDispatchConfig = {
+      site_id,
+      user_email: admin_email,
+      domain,
+      digest_enabled: false,
+      immediate_alerts_enabled: true,
+    };
+    return await dispatchFixNotification(payload, config, deps, {
+      fix_id: `link_graph_integrity_${site_id}`,
+    });
+  } catch {
+    return {
+      event: 'link_graph_integrity_fail',
+      dispatched: false,
+      method: 'skipped',
+      reason: 'dispatch error',
+    };
+  }
+}

@@ -13,7 +13,9 @@ export type FixNotificationEvent =
   | 'live_run_complete'
   | 'qa_failed'
   | 'drift_detected'
-  | 'drift_resolved';
+  | 'drift_resolved'
+  | 'link_graph_stale'
+  | 'link_graph_integrity_fail';
 
 export interface FixNotificationPayload {
   event:                FixNotificationEvent;
@@ -77,6 +79,10 @@ export function getNotificationSubject(payload: FixNotificationPayload): string 
         return `VAEO detected ${payload.fix_count ?? 0} reverted fixes on ${d}`;
       case 'drift_resolved':
         return `VAEO re-applied ${payload.fix_count ?? 0} fixes that were reverted on ${d}`;
+      case 'link_graph_stale':
+        return `Link graph stale for ${d}`;
+      case 'link_graph_integrity_fail':
+        return `Link graph integrity issue on ${d}`;
       default:
         return `VAEO notification for ${d}`;
     }
@@ -126,6 +132,19 @@ export function getNotificationBody(payload: FixNotificationPayload): string {
       case 'drift_resolved':
         lines.push(`VAEO re-applied ${payload.fix_count ?? 0} fixes that were reverted by a site update on ${d}.`);
         break;
+      case 'link_graph_stale':
+        lines.push(`Link graph has not been rebuilt for ${d}. Check nightly job status.`);
+        break;
+      case 'link_graph_integrity_fail':
+        lines.push(`Link graph integrity check found critical issues on ${d}.`);
+        if (payload.fix_summary && payload.fix_summary.length > 0) {
+          lines.push('');
+          lines.push('Critical issues:');
+          for (const item of payload.fix_summary) {
+            lines.push(`  • ${item}`);
+          }
+        }
+        break;
       default:
         lines.push(`Notification for ${d}.`);
     }
@@ -148,7 +167,7 @@ export function getNotificationBody(payload: FixNotificationPayload): string {
 
 export function shouldSendImmediately(event: FixNotificationEvent): boolean {
   try {
-    return event === 'fix_failed' || event === 'rollback_applied' || event === 'qa_failed' || event === 'drift_detected';
+    return event === 'fix_failed' || event === 'rollback_applied' || event === 'qa_failed' || event === 'drift_detected' || event === 'link_graph_stale' || event === 'link_graph_integrity_fail';
   } catch {
     return false;
   }
