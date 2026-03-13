@@ -8,6 +8,7 @@
 
 import { buildAuthHeader } from './wp_connection.js';
 import type { WPConnectionConfig } from './wp_connection.js';
+import { isProtectedRoute } from '../tracer/protected_route_auditor.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -230,6 +231,24 @@ export async function crawlWPSite(
       }
       pages.length = 0;
       pages.push(...filtered);
+    }
+
+    // Protected route filtering
+    {
+      const beforeCount = pages.length;
+      const kept: WPPage[] = [];
+      for (const page of pages) {
+        try {
+          if (isProtectedRoute(page.url, 'wordpress')) {
+            protected_pages_skipped++;
+            log(`[CRAWLER] Protected route filtered: ${page.url}`);
+            continue;
+          }
+        } catch { /* fail open */ }
+        kept.push(page);
+      }
+      pages.length = 0;
+      pages.push(...kept);
     }
 
     // Redirect resolution

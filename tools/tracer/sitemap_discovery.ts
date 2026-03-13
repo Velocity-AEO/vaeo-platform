@@ -14,6 +14,7 @@
  */
 
 import { isSystemUrl } from '../../packages/core/src/triage/triage_engine.js';
+import { isProtectedRoute } from './protected_route_auditor.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -193,6 +194,7 @@ export async function discoverShopifyURLs(
     if (seen.has(entry.url)) continue;
     seen.add(entry.url);
     if (isSystemUrl(entry.url)) continue;
+    if (isProtectedRoute(entry.url, 'shopify')) continue;
     try {
       if (new URL(entry.url).origin !== origin) continue;
     } catch { continue; }

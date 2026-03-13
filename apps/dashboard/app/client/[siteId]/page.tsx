@@ -13,6 +13,8 @@ import SimulatedDataBanner from '@/components/SimulatedDataBanner';
 import RankingsTrendPanel from '@/components/RankingsTrendPanel';
 import OrphanedPagesPanel from '@/components/OrphanedPagesPanel';
 import ConfidenceSummaryCard from '@/components/ConfidenceSummaryCard';
+import DriftScanPanel from '@/components/DriftScanPanel';
+import AEOScoreCard from '@/components/AEOScoreCard';
 import OnboardingProgressTracker from '@/components/OnboardingProgressTracker';
 import { calculateProgress, SHOPIFY_ONBOARDING_STEPS } from '@/../tools/onboarding/onboarding_progress';
 
@@ -414,6 +416,9 @@ export default function ClientDashboard() {
         </div>
       </section>
 
+      {/* AEO Score */}
+      <AEOScoreCard site_id={siteId} />
+
       {/* Fix decision confidence summary */}
       <ConfidenceSummaryCard site_id={siteId} />
 
@@ -541,6 +546,9 @@ export default function ClientDashboard() {
           </div>
         )}
       </section>
+
+      {/* Drift scan monitor */}
+      <DriftScanPanel site_id={siteId} />
 
     </div>
   );
