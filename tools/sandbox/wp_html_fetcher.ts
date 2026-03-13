@@ -24,6 +24,7 @@ export interface WPHTMLFetchResult {
   cache_bypassed: boolean;
   success:        boolean;
   error?:         string;
+  response_classification?: import('./response_classifier.js').ResponseClassification;
 }
 
 // ── buildCacheBypassUrl ───────────────────────────────────────────────────────
@@ -63,6 +64,8 @@ export function buildWPFetchHeaders(
 
 // ── fetchWPPageHTML ───────────────────────────────────────────────────────────
 
+import { classifyResponse } from './response_classifier.js';
+
 type FetchFn = typeof fetch;
 
 export async function fetchWPPageHTML(
@@ -82,6 +85,8 @@ export async function fetchWPPageHTML(
       signal: AbortSignal.timeout(config.timeout_ms ?? 30_000),
     });
     const html = await res.text();
+    const contentType = res.headers?.get?.('content-type') ?? '';
+    const classification = classifyResponse(res.status, contentType, html.length);
     return {
       url,
       html,
@@ -89,6 +94,7 @@ export async function fetchWPPageHTML(
       status_code:    res.status,
       cache_bypassed,
       success:        res.ok,
+      response_classification: classification,
       ...(!res.ok ? { error: `HTTP ${res.status}` } : {}),
     };
   };
@@ -100,6 +106,7 @@ export async function fetchWPPageHTML(
     try {
       return await attempt();
     } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
       return {
         url,
         html:           '',
@@ -107,7 +114,8 @@ export async function fetchWPPageHTML(
         status_code:    0,
         cache_bypassed,
         success:        false,
-        error:          err instanceof Error ? err.message : String(err),
+        error:          errMsg,
+        response_classification: classifyResponse(0, '', 0, errMsg),
       };
     }
   }

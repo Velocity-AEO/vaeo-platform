@@ -58,6 +58,7 @@ export interface WPSandboxResult {
   lighthouse_mobile_desktop_gap?: number;
   regressions?:                WPRegressionSignal[];
   failure_reasons:             string[];
+  response_classifications:    ResponseClassification[];
   started_at:                  string;
   completed_at:                string;
   capture_timed_out:           boolean;
@@ -65,7 +66,7 @@ export interface WPSandboxResult {
 }
 
 export interface WPSandboxDeps {
-  fetchHTMLFn?:       (url: string) => Promise<string>;
+  fetchHTMLFn?:       (url: string) => Promise<string | { html: string; response_classification?: ResponseClassification }>;
   deltaVerifyFn?:     (before: string, after: string, issue_type: string, expected_value: string) => Promise<{ verified: boolean; reason?: string }>;
   regressionFn?:      (before: string, after: string) => Promise<{ passed: boolean; regressions: WPRegressionSignal[] }>;
   /** Legacy single-score lighthouse (backward compat) */
@@ -127,14 +128,25 @@ export async function runWPSandbox(
   let regressions: WPRegressionSignal[] | undefined;
   let capture_timed_out = false;
   let timed_out_viewports: number[] = [];
+  const response_classifications: ResponseClassification[] = [];
+
+  // Helper to extract html string and optional classification from fetchHTMLFn
+  function extractFetchResult(raw: string | { html: string; response_classification?: ResponseClassification }): { html: string; classification?: ResponseClassification } {
+    if (typeof raw === 'string') return { html: raw };
+    return { html: raw?.html ?? '', classification: raw?.response_classification };
+  }
 
   try {
     // 1. Fetch before HTML snapshot
     try {
-      beforeHTML = await fetchHTML(url);
+      const raw = await fetchHTML(url);
+      const { html, classification } = extractFetchResult(raw);
+      beforeHTML = html;
+      if (classification) response_classifications.push(classification);
       if (!beforeHTML) {
         html_snapshot_success = false;
-        failure_reasons.push('html_snapshot_failed');
+        const diag = classification?.diagnostic_message;
+        failure_reasons.push(diag ? `html_snapshot_failed: ${diag}` : 'html_snapshot_failed');
       }
     } catch {
       html_snapshot_success = false;
@@ -150,9 +162,13 @@ export async function runWPSandbox(
 
     // 3. Fetch after HTML snapshot
     try {
-      afterHTML = await fetchHTML(url);
+      const raw = await fetchHTML(url);
+      const { html, classification } = extractFetchResult(raw);
+      afterHTML = html;
+      if (classification) response_classifications.push(classification);
       if (!afterHTML) {
-        failure_reasons.push('after_snapshot_failed');
+        const diag = classification?.diagnostic_message;
+        failure_reasons.push(diag ? `after_snapshot_failed: ${diag}` : 'after_snapshot_failed');
         html_snapshot_success = false;
       }
     } catch {
@@ -276,6 +292,7 @@ export async function runWPSandbox(
     lighthouse_mobile_desktop_gap,
     regressions,
     failure_reasons,
+    response_classifications,
     started_at,
     completed_at:          new Date().toISOString(),
     capture_timed_out,
