@@ -3,6 +3,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { getFixExplanation, type FixExplanation } from '../explanations/fix_explanation_registry.js';
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
 
@@ -21,6 +22,7 @@ export interface FixHistoryEntry {
   ranking_impact?:     number;
   approved_by:         'auto' | 'manual';
   sandbox_passed:      boolean;
+  explanation?:        FixExplanation;
 }
 
 export interface FixHistoryPage {
@@ -105,6 +107,7 @@ export function buildFixHistoryEntry(
       health_score_impact: 1 + (hash % 5), // 1-5 deterministic from fix_id
       approved_by:         'auto',
       sandbox_passed:      true,
+      explanation:         getFixExplanation(fix_type),
     };
   } catch {
     return {
@@ -121,6 +124,7 @@ export function buildFixHistoryEntry(
       health_score_impact: 1,
       approved_by:         'auto',
       sandbox_passed:      true,
+      explanation:         getFixExplanation(fix_type ?? ''),
     };
   }
 }
