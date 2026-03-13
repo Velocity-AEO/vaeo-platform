@@ -8,6 +8,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import * as Sentry from '@sentry/nextjs';
 import { createClient } from '@supabase/supabase-js';
 import { applyFix, type ApplyResult, type ApprovedItem, type ApplyDeps } from '../../../../../../tools/apply/apply_engine.js';
 import { applyFix as shopifyApplyFix } from '../../../../../../packages/adapters/shopify/src/index.js';
@@ -166,13 +167,21 @@ export async function POST(
   const errors: string[] = [];
 
   for (const item of items) {
-    const result = await applyFix(item, deps);
-    results.push(result);
-    if (result.success) {
-      applied++;
-    } else {
+    try {
+      const result = await applyFix(item, deps);
+      results.push(result);
+      if (result.success) {
+        applied++;
+      } else {
+        failed++;
+        if (result.error) errors.push(`${item.id}: ${result.error}`);
+      }
+    } catch (err) {
+      Sentry.captureException(err, { extra: { siteId, itemId: item.id } });
       failed++;
-      if (result.error) errors.push(`${item.id}: ${result.error}`);
+      const message = err instanceof Error ? err.message : String(err);
+      errors.push(`${item.id}: ${message}`);
+      results.push({ success: false, item_id: item.id, error: message });
     }
   }
 

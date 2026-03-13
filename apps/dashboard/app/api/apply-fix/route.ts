@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import * as Sentry from '@sentry/nextjs';
 import { getMainThemeId, readThemeLiquid, writeThemeLiquid } from '@/lib/shopify-admin';
 
 const IS_MOCK = process.env.APPLY_FIX_MOCK === 'true';
@@ -34,6 +35,7 @@ export async function POST(): Promise<NextResponse> {
     const { original_title } = await applyTitleFix();
     return NextResponse.json({ ok: true, original_title });
   } catch (err) {
+    Sentry.captureException(err);
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }

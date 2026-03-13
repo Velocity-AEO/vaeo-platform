@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import * as Sentry from '@sentry/nextjs';
 import { createServerClient } from '@/lib/supabase';
 import { scheduleWeeklyDigests, type SchedulerDeps, type TenantSite } from '../../../../../../tools/email/scheduler.js';
 import type { DigestDeps, ActionRow, HealthSnapshotRow } from '../../../../../../tools/email/digest.js';
@@ -117,7 +118,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const result = await scheduleWeeklyDigests(buildRealSchedulerDeps());
-
-  return NextResponse.json(result, { status: 200 });
+  try {
+    const result = await scheduleWeeklyDigests(buildRealSchedulerDeps());
+    return NextResponse.json(result, { status: 200 });
+  } catch (err) {
+    Sentry.captureException(err);
+    const message = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }
