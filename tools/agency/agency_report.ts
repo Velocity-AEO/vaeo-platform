@@ -30,6 +30,7 @@ export interface AgencyReport {
   sites_improved:       number;
   sites_declined:       number;
   gsc_connected_count:  number;
+  drift_summary?:       AgencyDriftSummary;
 }
 
 // ── getTopFixTypes ────────────────────────────────────────────────────────────
@@ -113,6 +114,88 @@ export function buildAgencyReport(
   }
 }
 
+// ── Agency drift summary ──────────────────────────────────────────────────────
+
+export interface AgencyDriftSummary {
+  total_drift_events_7d: number;
+  sites_with_drift:      number;
+  most_affected_site:    string | null;
+  most_common_cause:     string | null;
+  fixes_requeued:        number;
+}
+
+export interface AgencyDriftDeps {
+  loadFn?: (agency_id: string, period_days: number) => Promise<Array<{
+    site_id: string;
+    domain?: string;
+    probable_cause: string;
+    requeued: boolean;
+  }>>;
+}
+
+export async function loadAgencyDriftSummary(
+  agency_id: string,
+  period_days: number = 7,
+  deps?: AgencyDriftDeps,
+): Promise<AgencyDriftSummary> {
+  try {
+    if (!agency_id) return emptyDriftSummary();
+    const load = deps?.loadFn ?? defaultLoadDriftEvents;
+    const events = await load(agency_id, period_days);
+    if (!events || events.length === 0) return emptyDriftSummary();
+
+    const siteSet = new Set(events.map(e => e.site_id));
+    const causeCounts = new Map<string, number>();
+    const siteCounts = new Map<string, number>();
+    let requeued = 0;
+
+    for (const e of events) {
+      const cause = e.probable_cause || 'unknown';
+      causeCounts.set(cause, (causeCounts.get(cause) ?? 0) + 1);
+      siteCounts.set(e.site_id, (siteCounts.get(e.site_id) ?? 0) + 1);
+      if (e.requeued) requeued++;
+    }
+
+    let most_affected_site: string | null = null;
+    let maxCount = 0;
+    for (const [site, count] of siteCounts) {
+      if (count > maxCount) { most_affected_site = site; maxCount = count; }
+    }
+
+    let most_common_cause: string | null = null;
+    let maxCause = 0;
+    for (const [cause, count] of causeCounts) {
+      if (count > maxCause) { most_common_cause = cause; maxCause = count; }
+    }
+
+    return {
+      total_drift_events_7d: events.length,
+      sites_with_drift: siteSet.size,
+      most_affected_site,
+      most_common_cause,
+      fixes_requeued: requeued,
+    };
+  } catch {
+    return emptyDriftSummary();
+  }
+}
+
+function emptyDriftSummary(): AgencyDriftSummary {
+  return {
+    total_drift_events_7d: 0,
+    sites_with_drift: 0,
+    most_affected_site: null,
+    most_common_cause: null,
+    fixes_requeued: 0,
+  };
+}
+
+async function defaultLoadDriftEvents(
+  _agency_id: string, _period_days: number,
+): Promise<Array<{ site_id: string; domain?: string; probable_cause: string; requeued: boolean }>> {
+  return [];
+}
+
 // ── formatAgencyReport ────────────────────────────────────────────────────────
 
 export function formatAgencyReport(report: AgencyReport): string {
@@ -134,6 +217,19 @@ export function formatAgencyReport(report: AgencyReport): string {
     ];
     for (const t of (report.top_fix_types ?? [])) {
       lines.push(`  ${t.fix_type}: ${t.count}`);
+    }
+    if (report.drift_summary && report.drift_summary.total_drift_events_7d > 0) {
+      lines.push('');
+      lines.push('Drift Events This Period:');
+      lines.push(`  Total Drift Events: ${report.drift_summary.total_drift_events_7d}`);
+      lines.push(`  Sites With Drift: ${report.drift_summary.sites_with_drift}`);
+      if (report.drift_summary.most_affected_site) {
+        lines.push(`  Most Affected Site: ${report.drift_summary.most_affected_site}`);
+      }
+      if (report.drift_summary.most_common_cause) {
+        lines.push(`  Most Common Cause: ${report.drift_summary.most_common_cause}`);
+      }
+      lines.push(`  Fixes Requeued: ${report.drift_summary.fixes_requeued}`);
     }
     return lines.join('\n');
   } catch {

@@ -11,7 +11,9 @@ export type FixNotificationEvent =
   | 'fix_failed'
   | 'rollback_applied'
   | 'live_run_complete'
-  | 'qa_failed';
+  | 'qa_failed'
+  | 'drift_detected'
+  | 'drift_resolved';
 
 export interface FixNotificationPayload {
   event:                FixNotificationEvent;
@@ -71,6 +73,10 @@ export function getNotificationSubject(payload: FixNotificationPayload): string 
         return `VAEO run complete for ${d}`;
       case 'qa_failed':
         return `Viewport QA failed on ${d}`;
+      case 'drift_detected':
+        return `VAEO detected ${payload.fix_count ?? 0} reverted fixes on ${d}`;
+      case 'drift_resolved':
+        return `VAEO re-applied ${payload.fix_count ?? 0} fixes that were reverted on ${d}`;
       default:
         return `VAEO notification for ${d}`;
     }
@@ -113,6 +119,13 @@ export function getNotificationBody(payload: FixNotificationPayload): string {
           lines.push(`Failed viewports: ${payload.qa_failed_viewports.join(', ')}`);
         }
         break;
+      case 'drift_detected':
+        lines.push(`A recent update to your site overwrote ${payload.fix_count ?? 0} SEO fixes that VAEO previously applied.`);
+        lines.push('We have automatically re-queued these fixes and they will be reapplied tonight.');
+        break;
+      case 'drift_resolved':
+        lines.push(`VAEO re-applied ${payload.fix_count ?? 0} fixes that were reverted by a site update on ${d}.`);
+        break;
       default:
         lines.push(`Notification for ${d}.`);
     }
@@ -135,7 +148,7 @@ export function getNotificationBody(payload: FixNotificationPayload): string {
 
 export function shouldSendImmediately(event: FixNotificationEvent): boolean {
   try {
-    return event === 'fix_failed' || event === 'rollback_applied' || event === 'qa_failed';
+    return event === 'fix_failed' || event === 'rollback_applied' || event === 'qa_failed' || event === 'drift_detected';
   } catch {
     return false;
   }

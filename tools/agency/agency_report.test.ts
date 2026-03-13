@@ -5,6 +5,7 @@ import {
   getTopFixTypes,
   getAverageHealthScore,
   formatAgencyReport,
+  loadAgencyDriftSummary,
   type AgencyClientHealth,
 } from './agency_report.js';
 
@@ -153,5 +154,73 @@ describe('formatAgencyReport', () => {
 
   it('never throws on null', () => {
     assert.doesNotThrow(() => formatAgencyReport(null as any));
+  });
+
+  it('includes drift section when drift_summary present', () => {
+    const r = buildAgencyReport('ag1', 'last_30_days', [], []);
+    r.drift_summary = {
+      total_drift_events_7d: 5,
+      sites_with_drift: 2,
+      most_affected_site: 'site-3',
+      most_common_cause: 'theme_update',
+      fixes_requeued: 4,
+    };
+    const formatted = formatAgencyReport(r);
+    assert.ok(formatted.includes('Drift Events This Period'));
+    assert.ok(formatted.includes('5'));
+    assert.ok(formatted.includes('theme_update'));
+  });
+
+  it('omits drift section when no drift events', () => {
+    const r = buildAgencyReport('ag1', 'last_30_days', [], []);
+    r.drift_summary = {
+      total_drift_events_7d: 0,
+      sites_with_drift: 0,
+      most_affected_site: null,
+      most_common_cause: null,
+      fixes_requeued: 0,
+    };
+    const formatted = formatAgencyReport(r);
+    assert.ok(!formatted.includes('Drift Events'));
+  });
+});
+
+// ── loadAgencyDriftSummary ──────────────────────────────────────────────────
+
+describe('loadAgencyDriftSummary', () => {
+  it('returns empty summary with default deps', async () => {
+    const s = await loadAgencyDriftSummary('ag1');
+    assert.equal(s.total_drift_events_7d, 0);
+  });
+
+  it('calculates summary from events', async () => {
+    const s = await loadAgencyDriftSummary('ag1', 7, {
+      loadFn: async () => [
+        { site_id: 's1', probable_cause: 'theme_update', requeued: true },
+        { site_id: 's1', probable_cause: 'theme_update', requeued: true },
+        { site_id: 's2', probable_cause: 'plugin_update', requeued: false },
+      ],
+    });
+    assert.equal(s.total_drift_events_7d, 3);
+    assert.equal(s.sites_with_drift, 2);
+    assert.equal(s.most_affected_site, 's1');
+    assert.equal(s.most_common_cause, 'theme_update');
+    assert.equal(s.fixes_requeued, 2);
+  });
+
+  it('returns empty for missing agency_id', async () => {
+    const s = await loadAgencyDriftSummary('');
+    assert.equal(s.total_drift_events_7d, 0);
+  });
+
+  it('never throws on loadFn error', async () => {
+    const s = await loadAgencyDriftSummary('ag1', 7, {
+      loadFn: async () => { throw new Error('db down'); },
+    });
+    assert.equal(s.total_drift_events_7d, 0);
+  });
+
+  it('never throws on null', async () => {
+    await assert.doesNotReject(() => loadAgencyDriftSummary(null as any));
   });
 });

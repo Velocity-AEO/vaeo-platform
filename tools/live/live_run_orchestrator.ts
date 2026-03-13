@@ -51,6 +51,13 @@ import {
   prioritizeOrphanedPages,
   type OrphanedPageIssue,
 } from '../orphaned/orphaned_page_issue_builder.js';
+import {
+  requeueAllDriftedFixes,
+  buildDriftRequeueSummary,
+  type DriftEvent,
+  type DriftRequeueResult,
+  type DriftRequeueDeps,
+} from '../tracer/drift_requeue_engine.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -79,6 +86,9 @@ export interface LiveRunResult {
   timeout_fix_ids:      string[];
   orphaned_pages:       OrphanedPageIssue[];
   orphaned_pages_count: number;
+  drift_scan_run:       boolean;
+  fixes_drifted:        number;
+  fixes_requeued:       number;
 }
 
 export interface OrchestratorDeps {
@@ -122,6 +132,12 @@ export interface OrchestratorDeps {
     site_id: string,
     pages: DiscoveredPage[],
   ) => Array<{ url: string; page_title: string | null; internal_link_count: number }>;
+  /** Override drift scan for testing */
+  runDriftScanFn?: (site_id: string) => Promise<{ scanned: number; drifted: DriftEvent[] }>;
+  /** Override drift event save for testing */
+  saveDriftEventFn?: (event: DriftEvent) => Promise<void>;
+  /** Drift requeue deps for testing */
+  driftRequeueDeps?: DriftRequeueDeps;
 }
 
 // ── Orchestrator ─────────────────────────────────────────────────────────────
@@ -175,6 +191,9 @@ export async function runLiveProduction(
   let timeout_fix_ids: string[] = [];
   let orphaned_pages: OrphanedPageIssue[] = [];
   let orphaned_pages_count = 0;
+  let drift_scan_run = false;
+  let fixes_drifted = 0;
+  let fixes_requeued = 0;
 
   try {
     // Billing gate check
@@ -186,7 +205,7 @@ export async function runLiveProduction(
       );
       if (!billingResult.allowed) {
         state = transitionPhase(state, 'failed', getBillingBlockMessage(billingResult));
-        return { state, crawl: emptyCrawl, issues: emptyIssues, fixes: emptyFixes, health: null, timed_out_fixes: 0, timeout_fix_ids: [], orphaned_pages: [], orphaned_pages_count: 0 };
+        return { state, crawl: emptyCrawl, issues: emptyIssues, fixes: emptyFixes, health: null, timed_out_fixes: 0, timeout_fix_ids: [], orphaned_pages: [], orphaned_pages_count: 0, drift_scan_run: false, fixes_drifted: 0, fixes_requeued: 0 };
       }
     } catch {
       // Fail open — never block on billing infra error
@@ -369,7 +388,46 @@ export async function runLiveProduction(
       }
     }
 
-    return { state, crawl, issues, fixes, health, feedback_summary, data_source_summary, wp_sandbox: wpSandbox, timed_out_fixes, timeout_fix_ids, orphaned_pages, orphaned_pages_count };
+    // Drift scan — after fix pipeline, never blocks
+    try {
+      if (deps?.runDriftScanFn) {
+        const driftResult = await deps.runDriftScanFn(target.site_id);
+        drift_scan_run = true;
+        fixes_drifted = driftResult.drifted.length;
+
+        if (driftResult.drifted.length > 0) {
+          // Save drift events
+          const saveFn = deps.saveDriftEventFn ?? (async () => {});
+          for (const evt of driftResult.drifted) {
+            try { await saveFn(evt); } catch { /* non-fatal */ }
+          }
+
+          // Re-queue drifted fixes
+          const requeueResults = await requeueAllDriftedFixes(driftResult.drifted, deps.driftRequeueDeps);
+          const requeueSummary = buildDriftRequeueSummary(requeueResults);
+          fixes_requeued = requeueSummary.requeued;
+
+          // Drift notification
+          if (deps.notificationConfig) {
+            try {
+              const dispatch = deps.dispatchNotification ?? dispatchFixNotification;
+              const driftPayload = buildFixNotification('drift_detected' as any, target.site_id, target.domain, {
+                fix_count: driftResult.drifted.length,
+                fix_summary: driftResult.drifted.slice(0, 5).map(d => `${d.issue_type} on ${d.url}`),
+              });
+              await dispatch(driftPayload, deps.notificationConfig);
+            } catch { /* non-fatal */ }
+          }
+        }
+
+        const warn = deps.logWarning ?? ((msg: string) => process.stderr.write(`[orchestrator] ${msg}\n`));
+        warn(`[DRIFT_SCAN] site=${target.site_id} scanned=${driftResult.scanned} drifted=${driftResult.drifted.length} requeued=${fixes_requeued}`);
+      }
+    } catch {
+      // Drift scan failure must never block the pipeline
+    }
+
+    return { state, crawl, issues, fixes, health, feedback_summary, data_source_summary, wp_sandbox: wpSandbox, timed_out_fixes, timeout_fix_ids, orphaned_pages, orphaned_pages_count, drift_scan_run, fixes_drifted, fixes_requeued };
   } catch (err) {
     state = transitionPhase(
       state,
@@ -386,7 +444,7 @@ export async function runLiveProduction(
       // non-fatal
     }
 
-    return { state, crawl, issues, fixes, health, timed_out_fixes: 0, timeout_fix_ids: [], orphaned_pages, orphaned_pages_count };
+    return { state, crawl, issues, fixes, health, timed_out_fixes: 0, timeout_fix_ids: [], orphaned_pages, orphaned_pages_count, drift_scan_run: false, fixes_drifted: 0, fixes_requeued: 0 };
   }
 }
 

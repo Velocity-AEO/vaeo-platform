@@ -311,3 +311,83 @@ describe('dispatchFixNotification dedup', () => {
     assert.equal(rec!.fix_id, 'fix-1');
   });
 });
+
+// ── Drift notification ──────────────────────────────────────────────────────
+
+describe('dispatchFixNotification drift', () => {
+  it('drift_detected sends immediately', async () => {
+    let sent = false;
+    const deps = {
+      sendEmailFn: async () => { sent = true; },
+      scheduleDigestFn: async () => {},
+    };
+    const result = await dispatchFixNotification(
+      payload('drift_detected', { fix_count: 3 }), config(), deps,
+    );
+    assert.equal(result.method, 'immediate');
+    assert.equal(result.dispatched, true);
+    assert.equal(sent, true);
+  });
+
+  it('drift notification deduped within window', async () => {
+    const store = dedupStore();
+    let sendCount = 0;
+    const deps = {
+      sendEmailFn: async () => { sendCount++; },
+      scheduleDigestFn: async () => {},
+      dedupDeps: store,
+    };
+    await dispatchFixNotification(
+      payload('drift_detected', { fix_count: 3 }), config(), deps, { fix_id: 'drift-site-1' },
+    );
+    await dispatchFixNotification(
+      payload('drift_detected', { fix_count: 5 }), config(), deps, { fix_id: 'drift-site-1' },
+    );
+    assert.equal(sendCount, 1);
+  });
+
+  it('drift notification lists affected fixes in summary', async () => {
+    let body = '';
+    const deps = {
+      sendEmailFn: async (_to: string, _sub: string, b: string) => { body = b; },
+      scheduleDigestFn: async () => {},
+    };
+    await dispatchFixNotification(
+      payload('drift_detected', { fix_count: 2, fix_summary: ['title_missing on /page', 'schema on /about'] }),
+      config(), deps,
+    );
+    assert.ok(body.includes('title_missing'));
+    assert.ok(body.includes('schema'));
+  });
+
+  it('drift_resolved sends via digest', async () => {
+    const result = await dispatchFixNotification(
+      payload('drift_resolved', { fix_count: 2 }), config(),
+      { sendEmailFn: async () => {}, scheduleDigestFn: async () => {} },
+    );
+    assert.equal(result.method, 'digest');
+  });
+
+  it('notification not sent when dispatched=false', async () => {
+    const result = await dispatchFixNotification(
+      payload('drift_detected'), config({ immediate_alerts_enabled: false, digest_enabled: false }),
+    );
+    assert.equal(result.dispatched, false);
+  });
+
+  it('subject includes domain name', async () => {
+    const { getNotificationSubject } = await import('./fix_notification.js');
+    const sub = getNotificationSubject(payload('drift_detected', { fix_count: 3 }));
+    assert.ok(sub.includes('example.com'));
+  });
+
+  it('subject includes fix count', async () => {
+    const { getNotificationSubject } = await import('./fix_notification.js');
+    const sub = getNotificationSubject(payload('drift_detected', { fix_count: 5 }));
+    assert.ok(sub.includes('5'));
+  });
+
+  it('never throws on null payload', async () => {
+    await assert.doesNotReject(() => dispatchFixNotification(null as any, config()));
+  });
+});

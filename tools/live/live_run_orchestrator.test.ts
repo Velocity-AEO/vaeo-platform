@@ -461,3 +461,127 @@ describe('runLiveProduction — WP sandbox', () => {
     })));
   });
 });
+
+// ── Drift scan wiring ───────────────────────────────────────────────────────
+
+describe('runLiveProduction — drift scan', () => {
+  const driftEvent = {
+    fix_id: 'fix-1',
+    site_id: 'site_1',
+    url: 'https://x.com/products/a',
+    issue_type: 'title_missing',
+    expected_value: 'My Title',
+    current_value: '',
+    probable_cause: 'theme_update',
+    detected_at: new Date().toISOString(),
+  };
+
+  it('drift scan runs after fix pipeline', async () => {
+    let scanCalled = false;
+    const result = await runLiveProduction(target(), mockDeps({
+      runDriftScanFn: async () => { scanCalled = true; return { scanned: 10, drifted: [] }; },
+      logWarning: () => {},
+    }));
+    assert.equal(result.state.phase, 'complete');
+    assert.equal(scanCalled, true);
+    assert.equal(result.drift_scan_run, true);
+  });
+
+  it('drifted fixes are requeued', async () => {
+    const requeued: string[] = [];
+    const result = await runLiveProduction(target(), mockDeps({
+      runDriftScanFn: async () => ({ scanned: 10, drifted: [driftEvent] }),
+      driftRequeueDeps: {
+        createFixFn: async (fix) => { requeued.push(fix.fix_id as string); return fix.fix_id as string; },
+        loadOriginalFn: async () => ({}),
+      },
+      logWarning: () => {},
+    }));
+    assert.equal(result.fixes_drifted, 1);
+    assert.ok(requeued.length > 0);
+  });
+
+  it('drift scan failure does not block pipeline', async () => {
+    const result = await runLiveProduction(target(), mockDeps({
+      runDriftScanFn: async () => { throw new Error('drift boom'); },
+      logWarning: () => {},
+    }));
+    assert.equal(result.state.phase, 'complete');
+  });
+
+  it('live run summary includes drift counts', async () => {
+    const result = await runLiveProduction(target(), mockDeps({
+      runDriftScanFn: async () => ({ scanned: 5, drifted: [driftEvent] }),
+      driftRequeueDeps: {
+        createFixFn: async (fix) => fix.fix_id as string,
+        loadOriginalFn: async () => ({}),
+      },
+      logWarning: () => {},
+    }));
+    assert.equal(typeof result.drift_scan_run, 'boolean');
+    assert.equal(typeof result.fixes_drifted, 'number');
+    assert.equal(typeof result.fixes_requeued, 'number');
+  });
+
+  it('drift_scan_run=true when scan runs', async () => {
+    const result = await runLiveProduction(target(), mockDeps({
+      runDriftScanFn: async () => ({ scanned: 0, drifted: [] }),
+      logWarning: () => {},
+    }));
+    assert.equal(result.drift_scan_run, true);
+  });
+
+  it('drift_scan_run=false when no scan dep', async () => {
+    const result = await runLiveProduction(target(), mockDeps());
+    assert.equal(result.drift_scan_run, false);
+  });
+
+  it('fixes_drifted count correct', async () => {
+    const result = await runLiveProduction(target(), mockDeps({
+      runDriftScanFn: async () => ({
+        scanned: 10,
+        drifted: [driftEvent, { ...driftEvent, fix_id: 'fix-2' }],
+      }),
+      logWarning: () => {},
+    }));
+    assert.equal(result.fixes_drifted, 2);
+  });
+
+  it('fixes_requeued count correct', async () => {
+    const result = await runLiveProduction(target(), mockDeps({
+      runDriftScanFn: async () => ({ scanned: 10, drifted: [driftEvent] }),
+      driftRequeueDeps: {
+        createFixFn: async (fix) => fix.fix_id as string,
+        loadOriginalFn: async () => ({}),
+      },
+      logWarning: () => {},
+    }));
+    assert.equal(result.fixes_requeued, 1);
+  });
+
+  it('drift notification triggered when drifted > 0', async () => {
+    const dispatched: string[] = [];
+    const notifConfig = {
+      site_id: 'site_1', user_email: 'test@test.com', domain: 'x.com',
+      digest_enabled: true, immediate_alerts_enabled: true,
+    };
+    const result = await runLiveProduction(target(), mockDeps({
+      runDriftScanFn: async () => ({ scanned: 10, drifted: [driftEvent] }),
+      notificationConfig: notifConfig,
+      dispatchNotification: async (payload) => {
+        dispatched.push(payload.event);
+        return { event: payload.event, dispatched: true, method: 'immediate' };
+      },
+      logWarning: () => {},
+    }));
+    assert.equal(result.state.phase, 'complete');
+    assert.ok(dispatched.includes('drift_detected'));
+  });
+
+  it('never throws when drift scan throws', async () => {
+    await assert.doesNotReject(() => runLiveProduction(target(), mockDeps({
+      runDriftScanFn: async () => { throw new Error('drift scan explodes'); },
+      logWarning: () => {},
+    })));
+  });
+});
