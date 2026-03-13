@@ -58,6 +58,15 @@ import {
   type DriftRequeueResult,
   type DriftRequeueDeps,
 } from '../tracer/drift_requeue_engine.js';
+import { buildLinkGraph, type LinkGraphResult } from '../link_graph/link_graph_builder.js';
+import { runDepthAnalysis } from '../link_graph/link_depth_calculator.js';
+import { scoreAllPages } from '../link_graph/authority_scorer.js';
+import { captureVelocitySnapshot } from '../link_graph/link_velocity_tracker.js';
+import {
+  buildAllLinkGraphIssues,
+  type SEOIssue,
+  type LinkGraphIssueDeps,
+} from '../link_graph/link_fix_issue_builder.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -89,6 +98,10 @@ export interface LiveRunResult {
   drift_scan_run:       boolean;
   fixes_drifted:        number;
   fixes_requeued:       number;
+  link_graph_built:     boolean;
+  link_graph_pages:     number;
+  link_graph_orphaned:  number;
+  link_issues_added:    number;
 }
 
 export interface OrchestratorDeps {
@@ -138,6 +151,12 @@ export interface OrchestratorDeps {
   saveDriftEventFn?: (event: DriftEvent) => Promise<void>;
   /** Drift requeue deps for testing */
   driftRequeueDeps?: DriftRequeueDeps;
+  /** Override link graph build for testing */
+  buildLinkGraphFn?: (site_id: string) => Promise<LinkGraphResult>;
+  /** Override velocity snapshot capture for testing */
+  captureVelocityFn?: (site_id: string, graph: any, scores: any[]) => Promise<number>;
+  /** Link graph issue builder deps for testing */
+  linkGraphIssueDeps?: LinkGraphIssueDeps;
 }
 
 // ── Orchestrator ─────────────────────────────────────────────────────────────
@@ -194,6 +213,10 @@ export async function runLiveProduction(
   let drift_scan_run = false;
   let fixes_drifted = 0;
   let fixes_requeued = 0;
+  let link_graph_built = false;
+  let link_graph_pages = 0;
+  let link_graph_orphaned = 0;
+  let link_issues_added = 0;
 
   try {
     // Billing gate check
@@ -205,7 +228,7 @@ export async function runLiveProduction(
       );
       if (!billingResult.allowed) {
         state = transitionPhase(state, 'failed', getBillingBlockMessage(billingResult));
-        return { state, crawl: emptyCrawl, issues: emptyIssues, fixes: emptyFixes, health: null, timed_out_fixes: 0, timeout_fix_ids: [], orphaned_pages: [], orphaned_pages_count: 0, drift_scan_run: false, fixes_drifted: 0, fixes_requeued: 0 };
+        return { state, crawl: emptyCrawl, issues: emptyIssues, fixes: emptyFixes, health: null, timed_out_fixes: 0, timeout_fix_ids: [], orphaned_pages: [], orphaned_pages_count: 0, drift_scan_run: false, fixes_drifted: 0, fixes_requeued: 0, link_graph_built: false, link_graph_pages: 0, link_graph_orphaned: 0, link_issues_added: 0 };
       }
     } catch {
       // Fail open — never block on billing infra error
@@ -427,7 +450,51 @@ export async function runLiveProduction(
       // Drift scan failure must never block the pipeline
     }
 
-    return { state, crawl, issues, fixes, health, feedback_summary, data_source_summary, wp_sandbox: wpSandbox, timed_out_fixes, timeout_fix_ids, orphaned_pages, orphaned_pages_count, drift_scan_run, fixes_drifted, fixes_requeued };
+    // Link graph rebuild — after fix pipeline so it reflects latest state
+    try {
+      const graphBuildFn = deps?.buildLinkGraphFn ?? (async (sid: string) => buildLinkGraph(sid));
+      const graphResult = await graphBuildFn(target.site_id);
+      link_graph_built = true;
+      link_graph_pages = graphResult?.pages?.length ?? 0;
+
+      // Count orphaned (depth null or unreachable)
+      const depthMap = graphResult?.depth_results;
+      if (depthMap && depthMap instanceof Map) {
+        const reachable = new Set<string>();
+        for (const [url] of depthMap) reachable.add(url);
+        link_graph_orphaned = (graphResult.pages ?? []).filter(p => p?.url && !reachable.has(p.url)).length;
+      }
+
+      // Velocity snapshot
+      let velocity_snapshots = 0;
+      try {
+        const captureFn = deps?.captureVelocityFn ?? (async (sid: string, graph: any, scores: any[]) => captureVelocitySnapshot(sid, graph, scores));
+        velocity_snapshots = await captureFn(target.site_id, graphResult, graphResult?.authority_scores ?? []);
+      } catch { /* non-fatal */ }
+
+      const warn = deps?.logWarning ?? ((msg: string) => process.stderr.write(`[orchestrator] ${msg}\n`));
+      warn(`[LINK_GRAPH_REBUILD] site=${target.site_id} pages=${link_graph_pages} orphaned=${link_graph_orphaned} velocity_snapshots=${velocity_snapshots}`);
+    } catch {
+      // Link graph rebuild failure must never block the pipeline
+    }
+
+    // Link graph issues — add to fix pipeline
+    try {
+      const linkIssues = await buildAllLinkGraphIssues(target.site_id, deps?.linkGraphIssueDeps);
+      link_issues_added = linkIssues.length;
+      if (link_issues_added > 0) {
+        const warn = deps?.logWarning ?? ((msg: string) => process.stderr.write(`[orchestrator] ${msg}\n`));
+        const byType: Record<string, number> = {};
+        for (const iss of linkIssues) {
+          byType[iss.issue_type] = (byType[iss.issue_type] ?? 0) + 1;
+        }
+        warn(`[LINK_ISSUES] site=${target.site_id} redirect_chains=${byType['REDIRECT_CHAIN_INTERNAL_LINK'] ?? 0} canonical=${byType['CANONICAL_CONFLICT_LINK'] ?? 0} generic_anchors=${byType['GENERIC_ANCHOR_TEXT'] ?? 0} broken_external=${byType['BROKEN_EXTERNAL_LINK_REMOVE'] ?? 0}`);
+      }
+    } catch {
+      // Link issue building failure must never block the pipeline
+    }
+
+    return { state, crawl, issues, fixes, health, feedback_summary, data_source_summary, wp_sandbox: wpSandbox, timed_out_fixes, timeout_fix_ids, orphaned_pages, orphaned_pages_count, drift_scan_run, fixes_drifted, fixes_requeued, link_graph_built, link_graph_pages, link_graph_orphaned, link_issues_added };
   } catch (err) {
     state = transitionPhase(
       state,
@@ -444,7 +511,7 @@ export async function runLiveProduction(
       // non-fatal
     }
 
-    return { state, crawl, issues, fixes, health, timed_out_fixes: 0, timeout_fix_ids: [], orphaned_pages, orphaned_pages_count, drift_scan_run: false, fixes_drifted: 0, fixes_requeued: 0 };
+    return { state, crawl, issues, fixes, health, timed_out_fixes: 0, timeout_fix_ids: [], orphaned_pages, orphaned_pages_count, drift_scan_run: false, fixes_drifted: 0, fixes_requeued: 0, link_graph_built: false, link_graph_pages: 0, link_graph_orphaned: 0, link_issues_added: 0 };
   }
 }
 

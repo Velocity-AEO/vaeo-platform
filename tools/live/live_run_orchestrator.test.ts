@@ -585,3 +585,148 @@ describe('runLiveProduction — drift scan', () => {
     })));
   });
 });
+
+// ── Link graph rebuild wiring ────────────────────────────────────────────────
+
+describe('runLiveProduction — link graph rebuild', () => {
+  it('link graph rebuilds after fix pipeline', async () => {
+    let graphBuilt = false;
+    const result = await runLiveProduction(target(), mockDeps({
+      buildLinkGraphFn: async () => {
+        graphBuilt = true;
+        return { site_id: 'site_1', pages: [{ url: '/', title: 'Home', depth_from_homepage: 0, link_equity_score: 50, inbound_link_count: 10, outbound_link_count: 5, is_in_sitemap: true }], depth_results: new Map(), authority_scores: [], anchor_profiles: [], equity_leaks: [], built_at: '', analysis_errors: [] };
+      },
+      captureVelocityFn: async () => 1,
+      logWarning: () => {},
+    }));
+    assert.equal(result.state.phase, 'complete');
+    assert.equal(graphBuilt, true);
+    assert.equal(result.link_graph_built, true);
+  });
+
+  it('depth analysis runs after graph build', async () => {
+    const result = await runLiveProduction(target(), mockDeps({
+      buildLinkGraphFn: async () => ({
+        site_id: 'site_1',
+        pages: [{ url: '/', title: 'Home', depth_from_homepage: 0, link_equity_score: 50, inbound_link_count: 10, outbound_link_count: 5, is_in_sitemap: true }],
+        depth_results: new Map([['/', { url: '/', depth: 0, parent: null }]]),
+        authority_scores: [], anchor_profiles: [], equity_leaks: [], built_at: '', analysis_errors: [],
+      }),
+      logWarning: () => {},
+    }));
+    assert.equal(result.link_graph_pages, 1);
+  });
+
+  it('velocity snapshot captured after rebuild', async () => {
+    let captured = false;
+    await runLiveProduction(target(), mockDeps({
+      buildLinkGraphFn: async () => ({
+        site_id: 'site_1', pages: [], depth_results: new Map(),
+        authority_scores: [], anchor_profiles: [], equity_leaks: [], built_at: '', analysis_errors: [],
+      }),
+      captureVelocityFn: async () => { captured = true; return 5; },
+      logWarning: () => {},
+    }));
+    assert.equal(captured, true);
+  });
+
+  it('live run summary includes link_graph_built', async () => {
+    const result = await runLiveProduction(target(), mockDeps({
+      buildLinkGraphFn: async () => ({
+        site_id: 'site_1', pages: [], depth_results: new Map(),
+        authority_scores: [], anchor_profiles: [], equity_leaks: [], built_at: '', analysis_errors: [],
+      }),
+      logWarning: () => {},
+    }));
+    assert.equal(typeof result.link_graph_built, 'boolean');
+  });
+
+  it('live run summary includes orphaned count', async () => {
+    const result = await runLiveProduction(target(), mockDeps({
+      buildLinkGraphFn: async () => ({
+        site_id: 'site_1',
+        pages: [
+          { url: '/a', title: 'A', depth_from_homepage: 1, link_equity_score: 10, inbound_link_count: 1, outbound_link_count: 0, is_in_sitemap: true },
+          { url: '/b', title: 'B', depth_from_homepage: null, link_equity_score: 0, inbound_link_count: 0, outbound_link_count: 0, is_in_sitemap: true },
+        ],
+        depth_results: new Map([
+          ['/a', { url: '/a', depth: 1, parent: '/' }],
+        ]),
+        authority_scores: [], anchor_profiles: [], equity_leaks: [], built_at: '', analysis_errors: [],
+      }),
+      logWarning: () => {},
+    }));
+    assert.equal(result.link_graph_orphaned, 1);
+  });
+
+  it('graph rebuild failure does not block pipeline', async () => {
+    const result = await runLiveProduction(target(), mockDeps({
+      buildLinkGraphFn: async () => { throw new Error('graph boom'); },
+      logWarning: () => {},
+    }));
+    assert.equal(result.state.phase, 'complete');
+    assert.equal(result.link_graph_built, false);
+  });
+
+  it('link graph issues added to fix queue', async () => {
+    const result = await runLiveProduction(target(), mockDeps({
+      linkGraphIssueDeps: {
+        loadChainsFn: async () => [{
+          source_url: '/a', link_url: '/old', final_url: '/new',
+          hop_count: 1, chain: ['/old', '/new'], fix_action: 'update_link_to_final' as const,
+        }],
+      },
+      logWarning: () => {},
+    }));
+    assert.ok(result.link_issues_added >= 1);
+  });
+
+  it('redirect chain issues counted in link_issues_added', async () => {
+    const result = await runLiveProduction(target(), mockDeps({
+      linkGraphIssueDeps: {
+        loadChainsFn: async () => [
+          { source_url: '/a', link_url: '/old1', final_url: '/new1', hop_count: 1, chain: ['/old1', '/new1'], fix_action: 'update_link_to_final' as const },
+          { source_url: '/b', link_url: '/old2', final_url: '/new2', hop_count: 2, chain: ['/old2', '/mid', '/new2'], fix_action: 'update_link_to_final' as const },
+        ],
+      },
+      logWarning: () => {},
+    }));
+    assert.ok(result.link_issues_added >= 2);
+  });
+
+  it('broken external issues counted', async () => {
+    const result = await runLiveProduction(target(), mockDeps({
+      linkGraphIssueDeps: {
+        loadChecksFn: async () => [{
+          url: '/page', destination_url: 'https://broken.com', destination_domain: 'broken.com',
+          status_code: 404, is_broken: true, is_redirect: false, final_url: null,
+          redirect_hops: 0, response_time_ms: 100, is_nofollow: false,
+          domain_reputation: 'unknown' as const, check_error: null, checked_at: new Date().toISOString(),
+        }],
+      },
+      logWarning: () => {},
+    }));
+    assert.ok(result.link_issues_added >= 1);
+  });
+
+  it('link issue failure does not block pipeline', async () => {
+    const result = await runLiveProduction(target(), mockDeps({
+      linkGraphIssueDeps: {
+        loadChainsFn: async () => { throw new Error('issue boom'); },
+      },
+      logWarning: () => {},
+    }));
+    assert.equal(result.state.phase, 'complete');
+  });
+
+  it('never throws when all link graph deps fail', async () => {
+    await assert.doesNotReject(() => runLiveProduction(target(), mockDeps({
+      buildLinkGraphFn: async () => { throw new Error('graph boom'); },
+      captureVelocityFn: async () => { throw new Error('vel boom'); },
+      linkGraphIssueDeps: {
+        loadChainsFn: async () => { throw new Error('chain boom'); },
+      },
+      logWarning: () => {},
+    })));
+  });
+});

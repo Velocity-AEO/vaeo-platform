@@ -193,6 +193,56 @@ export const FIX_EXPLANATION_REGISTRY: Record<string, FixExplanation> = {
     category: 'social',
   },
 
+  REDIRECT_CHAIN_INTERNAL_LINK: {
+    issue_type: 'REDIRECT_CHAIN_INTERNAL_LINK',
+    short_label: 'Redirect Chain Fixed',
+    what_we_did: 'Updated an internal link that was pointing to a URL that redirects multiple times before reaching its destination.',
+    why_it_matters: 'Each redirect hop wastes a small amount of link equity. Linking directly to the final URL passes full equity with no waste.',
+    expected_impact: 'Minor ranking improvement on the destination page as it now receives full link equity.',
+    learn_more_url: null,
+    category: 'seo',
+  },
+
+  CANONICAL_CONFLICT_LINK: {
+    issue_type: 'CANONICAL_CONFLICT_LINK',
+    short_label: 'Canonical Conflict Fixed',
+    what_we_did: 'Updated an internal link that was pointing to a non-canonical version of a page.',
+    why_it_matters: 'Links to non-canonical pages split equity between the canonical and non-canonical version. Google consolidates signals to the canonical — your link should too.',
+    expected_impact: 'Improved ranking signals on the canonical page as it now receives direct link equity.',
+    learn_more_url: null,
+    category: 'seo',
+  },
+
+  GENERIC_ANCHOR_TEXT: {
+    issue_type: 'GENERIC_ANCHOR_TEXT',
+    short_label: 'Anchor Text Improved',
+    what_we_did: 'Replaced generic anchor text (click here, read more) with descriptive text about the destination page.',
+    why_it_matters: 'Anchor text is a relevance signal. Generic anchors tell Google nothing about the destination. Descriptive anchors reinforce the topic of the page being linked to.',
+    expected_impact: 'Improved topical relevance signals on destination page over time.',
+    learn_more_url: null,
+    category: 'seo',
+  },
+
+  BROKEN_EXTERNAL_LINK_REMOVE: {
+    issue_type: 'BROKEN_EXTERNAL_LINK_REMOVE',
+    short_label: 'Broken Link Removed',
+    what_we_did: 'Removed an outbound link to an external page that is no longer accessible.',
+    why_it_matters: 'Broken outbound links are a negative quality signal and create a poor user experience.',
+    expected_impact: 'Minor quality signal improvement — broken links removed.',
+    learn_more_url: null,
+    category: 'seo',
+  },
+
+  BROKEN_EXTERNAL_LINK_NOFOLLOW: {
+    issue_type: 'BROKEN_EXTERNAL_LINK_NOFOLLOW',
+    short_label: 'Nofollow Added',
+    what_we_did: 'Added nofollow attribute to an outbound link to a low-value external domain.',
+    why_it_matters: 'Followed links to low-value domains pass equity out of your site. Nofollow stops this while keeping the link visible.',
+    expected_impact: 'Equity retained on your site rather than passed to external domain.',
+    learn_more_url: null,
+    category: 'seo',
+  },
+
   ORPHANED_PAGE: {
     issue_type: 'ORPHANED_PAGE',
     short_label: 'Internal Links Added',

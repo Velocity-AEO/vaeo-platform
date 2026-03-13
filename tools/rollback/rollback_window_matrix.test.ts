@@ -246,3 +246,51 @@ describe('constants', () => {
     }
   });
 });
+
+// ── Link graph fix rollback windows ──────────────────────────────────────────
+
+describe('link graph fix rollback windows', () => {
+  it('REDIRECT_CHAIN_INTERNAL_LINK window is 168h', () => {
+    assert.equal(getRollbackWindowHours('REDIRECT_CHAIN_INTERNAL_LINK'), 168);
+  });
+
+  it('CANONICAL_CONFLICT_LINK window is 168h', () => {
+    assert.equal(getRollbackWindowHours('CANONICAL_CONFLICT_LINK'), 168);
+  });
+
+  it('GENERIC_ANCHOR_TEXT window is 72h', () => {
+    assert.equal(getRollbackWindowHours('GENERIC_ANCHOR_TEXT'), 72);
+  });
+
+  it('BROKEN_EXTERNAL_LINK_REMOVE window is 48h', () => {
+    assert.equal(getRollbackWindowHours('BROKEN_EXTERNAL_LINK_REMOVE'), 48);
+  });
+
+  it('BROKEN_EXTERNAL_LINK_NOFOLLOW window is 48h', () => {
+    assert.equal(getRollbackWindowHours('BROKEN_EXTERNAL_LINK_NOFOLLOW'), 48);
+  });
+
+  it('all new types have defined windows', () => {
+    const types = [
+      'REDIRECT_CHAIN_INTERNAL_LINK', 'CANONICAL_CONFLICT_LINK',
+      'GENERIC_ANCHOR_TEXT', 'BROKEN_EXTERNAL_LINK_REMOVE', 'BROKEN_EXTERNAL_LINK_NOFOLLOW',
+    ];
+    for (const t of types) {
+      assert.ok(ROLLBACK_WINDOWS[t] !== undefined, `${t} should have a defined window`);
+    }
+  });
+
+  it('GENERIC_ANCHOR_TEXT label is 72 hours', () => {
+    assert.equal(getRollbackWindowLabel('GENERIC_ANCHOR_TEXT'), '72 hours');
+  });
+
+  it('never throws on link graph types', () => {
+    assert.doesNotThrow(() => {
+      getRollbackWindowHours('REDIRECT_CHAIN_INTERNAL_LINK');
+      getRollbackWindowHours('CANONICAL_CONFLICT_LINK');
+      getRollbackWindowHours('GENERIC_ANCHOR_TEXT');
+      getRollbackWindowHours('BROKEN_EXTERNAL_LINK_REMOVE');
+      getRollbackWindowHours('BROKEN_EXTERNAL_LINK_NOFOLLOW');
+    });
+  });
+});

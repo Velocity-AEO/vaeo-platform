@@ -148,6 +148,35 @@ export const FIX_RISK_MATRIX: Record<string, FixRiskProfile> = {
     'Schema injection modifies structured data — high impact',
   ),
 
+  // ── Link graph fixes ─────────────────────────────────────────────────────
+  REDIRECT_CHAIN_INTERNAL_LINK: low(
+    'REDIRECT_CHAIN_INTERNAL_LINK',
+    'Low risk — updating href to final URL, no content change',
+    50,
+  ),
+  GENERIC_ANCHOR_TEXT: low(
+    'GENERIC_ANCHOR_TEXT',
+    'Low risk — improves relevance signals, no layout change',
+    30,
+  ),
+  BROKEN_EXTERNAL_LINK_NOFOLLOW: low(
+    'BROKEN_EXTERNAL_LINK_NOFOLLOW',
+    'Low risk — attribute addition only',
+    50,
+  ),
+  CANONICAL_CONFLICT_LINK: medium(
+    'CANONICAL_CONFLICT_LINK',
+    'Medium risk — changing where link equity flows',
+    false,
+    20,
+  ),
+  BROKEN_EXTERNAL_LINK_REMOVE: medium(
+    'BROKEN_EXTERNAL_LINK_REMOVE',
+    'Medium risk — removes content from page',
+    false,
+    20,
+  ),
+
   // ── Never auto-approve ────────────────────────────────────────────────────
   ORPHANED_PAGE: {
     issue_type:                 'ORPHANED_PAGE',

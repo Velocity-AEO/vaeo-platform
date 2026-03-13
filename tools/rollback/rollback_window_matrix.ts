@@ -31,6 +31,13 @@ export const ROLLBACK_WINDOWS: Record<string, number> = {
   OG_TITLE:   120,
   OG_DESC:    120,
 
+  // 7 days — link graph fixes (high impact)
+  REDIRECT_CHAIN_INTERNAL_LINK: 168,
+  CANONICAL_CONFLICT_LINK:      168,
+
+  // 3 days — anchor text
+  GENERIC_ANCHOR_TEXT:          72,
+
   // 48 hours — safe, fast to verify
   TITLE_MISSING:      48,
   TITLE_LONG:         48,
@@ -39,7 +46,9 @@ export const ROLLBACK_WINDOWS: Record<string, number> = {
   META_DESC_LONG:     48,
   ALT_MISSING:        48,
   SPEAKABLE_MISSING:  48,
-  ORPHANED_PAGE:      48,
+  ORPHANED_PAGE:                48,
+  BROKEN_EXTERNAL_LINK_REMOVE:  48,
+  BROKEN_EXTERNAL_LINK_NOFOLLOW: 48,
 };
 
 // ── Functions ────────────────────────────────────────────────────────────────
