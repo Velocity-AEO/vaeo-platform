@@ -8,6 +8,11 @@
  */
 
 import type { AggregatedIssue } from './issue_aggregator.js';
+import {
+  withFixTimeout,
+  FIX_EXECUTION_TIMEOUT_MS,
+  buildTimeoutFailureReason,
+} from './fix_timeout_engine.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -23,6 +28,10 @@ export interface FixAttempt {
   deployed:        boolean;
   dry_run:         boolean;
   error?:          string;
+  failure_reason?: string;
+  status?:         string;
+  timed_out:       boolean;
+  elapsed_ms:      number;
   debug_events:    string[];
   data_source?:    'gsc_live' | 'simulated';
 }
@@ -49,6 +58,12 @@ export interface FixDeps {
   deployFix?: (site_id: string, url: string, html: string) =>
     Promise<{ deployed: boolean }>;
   data_source?: 'gsc_live' | 'simulated';
+  /** Override timeout ceiling (ms) per fix; defaults to FIX_EXECUTION_TIMEOUT_MS */
+  timeoutMs?: number;
+  /** Injectable logger for timeout events */
+  logFn?: (msg: string) => void;
+  /** Injectable timeout signal factory (for tests) */
+  timeoutFn?: (ms: number) => Promise<never>;
 }
 
 export interface BatchDeps extends FixDeps {
@@ -110,94 +125,133 @@ async function defaultDeployFix(
 // ── Single fix attempt ───────────────────────────────────────────────────────
 
 export async function executeFixAttempt(
-  issue: AggregatedIssue,
-  html: string,
+  issue:   AggregatedIssue,
+  html:    string,
   dry_run: boolean,
-  deps?: FixDeps,
+  deps?:   FixDeps,
 ): Promise<FixAttempt> {
-  const startedAt = new Date().toISOString();
-  const debug_events: string[] = [];
-
+  const startedAt   = new Date().toISOString();
   const data_source = deps?.data_source;
+  const timeoutMs   = deps?.timeoutMs ?? FIX_EXECUTION_TIMEOUT_MS;
+  const logFn       = deps?.logFn ?? ((msg: string) => process.stderr.write(msg + '\n'));
 
-  try {
-    const applyFix = deps?.applyFix ?? defaultApplyFix;
-    const sandboxValidate = deps?.sandboxValidate ?? defaultSandboxValidate;
-    const deployFix = deps?.deployFix ?? defaultDeployFix;
+  const { result, timeout_result } = await withFixTimeout(
+    issue.issue_id,
+    async () => {
+      const debug_events: string[] = [];
+      try {
+        const applyFix        = deps?.applyFix        ?? defaultApplyFix;
+        const sandboxValidate = deps?.sandboxValidate ?? defaultSandboxValidate;
+        const deployFix       = deps?.deployFix       ?? defaultDeployFix;
 
-    // 1. Apply fix
-    debug_events.push(`[apply] Starting fix for ${issue.fix_type} on ${issue.url}`);
-    const fixResult = await applyFix(html, issue.fix_type);
-    debug_events.push(`[apply] success=${fixResult.success}`);
+        // 1. Apply fix
+        debug_events.push(`[apply] Starting fix for ${issue.fix_type} on ${issue.url}`);
+        const fixResult = await applyFix(html, issue.fix_type);
+        debug_events.push(`[apply] success=${fixResult.success}`);
 
-    if (!fixResult.success) {
-      return {
-        attempt_id:     generateAttemptId(),
-        issue,
-        started_at:     startedAt,
-        completed_at:   new Date().toISOString(),
-        success:        false,
-        html_before:    html,
-        html_after:     html,
-        sandbox_passed: false,
-        deployed:       false,
-        dry_run,
-        error:          `Fix application failed for ${issue.fix_type}`,
-        debug_events,
-        ...(data_source ? { data_source } : {}),
-      };
-    }
+        if (!fixResult.success) {
+          return {
+            attempt_id:     generateAttemptId(),
+            issue,
+            started_at:     startedAt,
+            completed_at:   new Date().toISOString(),
+            success:        false,
+            html_before:    html,
+            html_after:     html,
+            sandbox_passed: false,
+            deployed:       false,
+            dry_run,
+            error:          `Fix application failed for ${issue.fix_type}`,
+            debug_events,
+            timed_out:      false,
+            elapsed_ms:     0,
+            ...(data_source ? { data_source } : {}),
+          } satisfies FixAttempt;
+        }
 
-    // 2. Sandbox validate
-    debug_events.push('[sandbox] Running validation');
-    const sandboxResult = await sandboxValidate(fixResult.html);
-    debug_events.push(`[sandbox] passed=${sandboxResult.passed}`);
+        // 2. Sandbox validate
+        debug_events.push('[sandbox] Running validation');
+        const sandboxResult = await sandboxValidate(fixResult.html);
+        debug_events.push(`[sandbox] passed=${sandboxResult.passed}`);
 
-    if (!sandboxResult.passed) {
-      return {
-        attempt_id:     generateAttemptId(),
-        issue,
-        started_at:     startedAt,
-        completed_at:   new Date().toISOString(),
-        success:        false,
-        html_before:    html,
-        html_after:     fixResult.html,
-        sandbox_passed: false,
-        deployed:       false,
-        dry_run,
-        error:          `Sandbox validation failed: ${sandboxResult.errors.join(', ')}`,
-        debug_events,
-        ...(data_source ? { data_source } : {}),
-      };
-    }
+        if (!sandboxResult.passed) {
+          return {
+            attempt_id:     generateAttemptId(),
+            issue,
+            started_at:     startedAt,
+            completed_at:   new Date().toISOString(),
+            success:        false,
+            html_before:    html,
+            html_after:     fixResult.html,
+            sandbox_passed: false,
+            deployed:       false,
+            dry_run,
+            error:          `Sandbox validation failed: ${sandboxResult.errors.join(', ')}`,
+            debug_events,
+            timed_out:      false,
+            elapsed_ms:     0,
+            ...(data_source ? { data_source } : {}),
+          } satisfies FixAttempt;
+        }
 
-    // 3. Deploy (skip if dry_run)
-    let deployed = false;
-    if (dry_run) {
-      debug_events.push('[deploy] Skipped (dry run)');
-    } else {
-      debug_events.push('[deploy] Deploying fix');
-      const deployResult = await deployFix(issue.site_id, issue.url, fixResult.html);
-      deployed = deployResult.deployed;
-      debug_events.push(`[deploy] deployed=${deployed}`);
-    }
+        // 3. Deploy (skip if dry_run)
+        let deployed = false;
+        if (dry_run) {
+          debug_events.push('[deploy] Skipped (dry run)');
+        } else {
+          debug_events.push('[deploy] Deploying fix');
+          const deployResult = await deployFix(issue.site_id, issue.url, fixResult.html);
+          deployed = deployResult.deployed;
+          debug_events.push(`[deploy] deployed=${deployed}`);
+        }
 
-    return {
-      attempt_id:     generateAttemptId(),
-      issue,
-      started_at:     startedAt,
-      completed_at:   new Date().toISOString(),
-      success:        true,
-      html_before:    html,
-      html_after:     fixResult.html,
-      sandbox_passed: true,
-      deployed,
-      dry_run,
-      debug_events,
-      ...(data_source ? { data_source } : {}),
-    };
-  } catch (err) {
-    debug_events.push(`[error] ${err instanceof Error ? err.message : String(err)}`);
+        return {
+          attempt_id:     generateAttemptId(),
+          issue,
+          started_at:     startedAt,
+          completed_at:   new Date().toISOString(),
+          success:        true,
+          html_before:    html,
+          html_after:     fixResult.html,
+          sandbox_passed: true,
+          deployed,
+          dry_run,
+          debug_events,
+          timed_out:      false,
+          elapsed_ms:     0,
+          ...(data_source ? { data_source } : {}),
+        } satisfies FixAttempt;
+      } catch (err) {
+        debug_events.push(`[error] ${err instanceof Error ? err.message : String(err)}`);
+        return {
+          attempt_id:     generateAttemptId(),
+          issue,
+          started_at:     startedAt,
+          completed_at:   new Date().toISOString(),
+          success:        false,
+          html_before:    html,
+          html_after:     html,
+          sandbox_passed: false,
+          deployed:       false,
+          dry_run,
+          error:          err instanceof Error ? err.message : String(err),
+          debug_events,
+          timed_out:      false,
+          elapsed_ms:     0,
+          ...(data_source ? { data_source } : {}),
+        } satisfies FixAttempt;
+      }
+    },
+    timeoutMs,
+    { timeoutFn: deps?.timeoutFn, logFn },
+  );
+
+  // Timeout path
+  if (timeout_result.timed_out) {
+    logFn(
+      `[FIX_EXECUTOR_TIMEOUT] fix=${issue.issue_id} site=${issue.site_id} type=${issue.fix_type} elapsed=${timeout_result.elapsed_ms}ms`,
+    );
+    const reason = buildTimeoutFailureReason(issue.issue_id, timeoutMs);
     return {
       attempt_id:     generateAttemptId(),
       issue,
@@ -209,11 +263,36 @@ export async function executeFixAttempt(
       sandbox_passed: false,
       deployed:       false,
       dry_run,
-      error:          err instanceof Error ? err.message : String(err),
-      debug_events,
+      error:          reason,
+      failure_reason: reason,
+      status:         'timed_out',
+      debug_events:   [`[timeout] ${reason}`],
+      timed_out:      true,
+      elapsed_ms:     timeout_result.elapsed_ms,
       ...(data_source ? { data_source } : {}),
     };
   }
+
+  // Normal path: stamp elapsed_ms onto the inner result
+  const base = result ?? {
+    attempt_id:     generateAttemptId(),
+    issue,
+    started_at:     startedAt,
+    completed_at:   new Date().toISOString(),
+    success:        false,
+    html_before:    html,
+    html_after:     html,
+    sandbox_passed: false,
+    deployed:       false,
+    dry_run,
+    error:          timeout_result.error ?? 'Unknown error',
+    debug_events:   [],
+    timed_out:      false,
+    elapsed_ms:     0,
+    ...(data_source ? { data_source } : {}),
+  };
+
+  return { ...base, elapsed_ms: timeout_result.elapsed_ms };
 }
 
 // ── Batch executor ───────────────────────────────────────────────────────────

@@ -12,6 +12,7 @@ import {
   type FixAttempt,
   type FixBatch,
 } from './live_fix_executor.js';
+import { FixTimeoutError } from './fix_timeout_engine.js';
 import type { AggregatedIssue } from './issue_aggregator.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -209,5 +210,87 @@ describe('executeFixBatch', () => {
       fetchPageHTML: async () => '<html><head></head><body>Custom</body></html>',
     });
     assert.ok(batch.attempts[0].html_before.includes('Custom'));
+  });
+});
+
+// ── Timeout wiring ────────────────────────────────────────────────────────────
+
+describe('executeFixAttempt — timeout wiring', () => {
+  /** timeoutFn that fires immediately for injection into executor */
+  const immediateTimeoutFn = (ms: number): Promise<never> =>
+    Promise.reject(new FixTimeoutError('injected', ms));
+
+  /** Slow applyFix that would hang without timeout */
+  const hangingApplyFix = async (html: string) =>
+    new Promise<{ html: string; success: boolean }>(() => {});
+
+  it('marks fix as timed_out when timeout fires', async () => {
+    const result = await executeFixAttempt(issue('title_missing'), BASE_HTML, false, {
+      applyFix:   hangingApplyFix,
+      timeoutFn:  immediateTimeoutFn,
+    });
+    assert.equal(result.timed_out, true);
+  });
+
+  it('sets failure_reason on timeout', async () => {
+    const result = await executeFixAttempt(issue('title_missing'), BASE_HTML, false, {
+      applyFix:   hangingApplyFix,
+      timeoutFn:  immediateTimeoutFn,
+    });
+    assert.ok(result.failure_reason);
+    assert.ok(result.failure_reason!.includes('will retry next run'));
+  });
+
+  it('does not throw on timeout', async () => {
+    await assert.doesNotReject(() =>
+      executeFixAttempt(issue('title_missing'), BASE_HTML, false, {
+        applyFix:  hangingApplyFix,
+        timeoutFn: immediateTimeoutFn,
+      }),
+    );
+  });
+
+  it('sets status to timed_out', async () => {
+    const result = await executeFixAttempt(issue('title_missing'), BASE_HTML, false, {
+      applyFix:   hangingApplyFix,
+      timeoutFn:  immediateTimeoutFn,
+    });
+    assert.equal(result.status, 'timed_out');
+  });
+
+  it('logs timeout with fix_id', async () => {
+    const logs: string[] = [];
+    const iss = issue('title_missing', { issue_id: 'iss_timeout_log' });
+    await executeFixAttempt(iss, BASE_HTML, false, {
+      applyFix:  hangingApplyFix,
+      timeoutFn: immediateTimeoutFn,
+      logFn:     (msg) => logs.push(msg),
+    });
+    assert.ok(logs.some((l) => l.includes('iss_timeout_log')));
+  });
+
+  it('timed_out included in fix result (false on normal path)', async () => {
+    const result = await executeFixAttempt(issue('title_missing'), BASE_HTML, false);
+    assert.equal(typeof result.timed_out, 'boolean');
+    assert.equal(result.timed_out, false);
+  });
+
+  it('elapsed_ms included in fix result', async () => {
+    const result = await executeFixAttempt(issue('title_missing'), BASE_HTML, false);
+    assert.equal(typeof result.elapsed_ms, 'number');
+    assert.ok(result.elapsed_ms >= 0);
+  });
+
+  it('Shopify and WordPress fixes both wrapped in timeout (batch)', async () => {
+    const shopifyIssue  = issue('title_missing',            { issue_id: 'shopify_1', site_id: 'shop_site' });
+    const wordpressIssue = issue('meta_description_missing', { issue_id: 'wp_1',     site_id: 'wp_site' });
+
+    const batch = await executeFixBatch([shopifyIssue, wordpressIssue], 'multi', 'run_1', false, {
+      applyFix:  hangingApplyFix,
+      timeoutFn: immediateTimeoutFn,
+    });
+
+    assert.equal(batch.attempts.length, 2);
+    assert.ok(batch.attempts.every((a) => a.timed_out === true));
   });
 });

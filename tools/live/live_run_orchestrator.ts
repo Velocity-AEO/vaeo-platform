@@ -70,6 +70,8 @@ export interface LiveRunResult {
   feedback_summary?:    FeedbackSummary;
   data_source_summary?: DataSourceSummary;
   wp_sandbox?:          WPSandboxCounts;
+  timed_out_fixes:      number;
+  timeout_fix_ids:      string[];
 }
 
 export interface OrchestratorDeps {
@@ -153,10 +155,12 @@ export async function runLiveProduction(
     dry_run: target.dry_run,
   };
 
-  let crawl = emptyCrawl;
-  let issues = emptyIssues;
-  let fixes = emptyFixes;
+  let crawl            = emptyCrawl;
+  let issues           = emptyIssues;
+  let fixes            = emptyFixes;
   let health: SystemHealthReport | null = null;
+  let timed_out_fixes  = 0;
+  let timeout_fix_ids: string[] = [];
 
   try {
     // Billing gate check
@@ -168,7 +172,7 @@ export async function runLiveProduction(
       );
       if (!billingResult.allowed) {
         state = transitionPhase(state, 'failed', getBillingBlockMessage(billingResult));
-        return { state, crawl: emptyCrawl, issues: emptyIssues, fixes: emptyFixes, health: null };
+        return { state, crawl: emptyCrawl, issues: emptyIssues, fixes: emptyFixes, health: null, timed_out_fixes: 0, timeout_fix_ids: [] };
       }
     } catch {
       // Fail open — never block on billing infra error
@@ -250,6 +254,14 @@ export async function runLiveProduction(
       }
     }
 
+    // Timeout accounting
+    timed_out_fixes = fixes.attempts.filter((a) => a.timed_out).length;
+    timeout_fix_ids = fixes.attempts.filter((a) => a.timed_out).map((a) => a.attempt_id);
+    if (timed_out_fixes > 0) {
+      const warn = deps?.logWarning ?? ((msg: string) => process.stderr.write(`[orchestrator] ${msg}\n`));
+      warn(`[LIVE_RUN] ${timed_out_fixes} fixes timed out during run for site ${target.site_id}`);
+    }
+
     state = {
       ...state,
       fixes_applied:    fixes.success_count,
@@ -326,7 +338,7 @@ export async function runLiveProduction(
       }
     }
 
-    return { state, crawl, issues, fixes, health, feedback_summary, data_source_summary, wp_sandbox: wpSandbox };
+    return { state, crawl, issues, fixes, health, feedback_summary, data_source_summary, wp_sandbox: wpSandbox, timed_out_fixes, timeout_fix_ids };
   } catch (err) {
     state = transitionPhase(
       state,
@@ -343,6 +355,6 @@ export async function runLiveProduction(
       // non-fatal
     }
 
-    return { state, crawl, issues, fixes, health };
+    return { state, crawl, issues, fixes, health, timed_out_fixes: 0, timeout_fix_ids: [] };
   }
 }
