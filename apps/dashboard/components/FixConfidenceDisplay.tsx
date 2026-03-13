@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import LearnMoreLink from './LearnMoreLink';
 
 // ── Types (inlined for Next.js bundler) ──────────────────────────────────────
 
@@ -96,7 +97,7 @@ export default function FixConfidenceDisplay({ data, expanded: initialExpanded }
           {/* Confidence score bar */}
           <div>
             <div className="flex items-center justify-between mb-1">
-              <span className="font-medium text-slate-600">Confidence Score</span>
+              <span className="font-medium text-slate-600">Confidence Score<LearnMoreLink article_slug="understanding-confidence-scores" /></span>
               <span className={`font-semibold ${data.confidence_color}`}>
                 {scorePct}% confidence ({threshPct}% required)
               </span>

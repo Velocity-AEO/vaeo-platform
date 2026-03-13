@@ -1,5 +1,7 @@
 'use client';
 
+import LearnMoreLink from '../../../components/LearnMoreLink';
+
 interface HealthTrendProps {
   health: {
     current_score: number;
@@ -69,7 +71,7 @@ export default function HealthTrend({ health }: HealthTrendProps) {
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-6">
       <div className="flex items-start justify-between mb-6">
-        <h2 className="text-sm font-medium text-slate-500 uppercase tracking-wide">Health Score</h2>
+        <h2 className="text-sm font-medium text-slate-500 uppercase tracking-wide">Health Score<LearnMoreLink article_slug="how-health-score-works" /></h2>
         <TrendLabel trend={health.trend} />
       </div>
 

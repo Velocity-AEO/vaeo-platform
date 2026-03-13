@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import LearnMoreLink from './LearnMoreLink';
 import {
   getDirectionColor,
   getDirectionIcon,
@@ -81,7 +82,7 @@ export default function RankingsTrendPanel({ siteId }: { siteId: string }) {
   return (
     <section>
       <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
-        <h2 className="text-base font-semibold text-slate-700">Keyword Movement</h2>
+        <h2 className="text-base font-semibold text-slate-700">Keyword Movement<LearnMoreLink article_slug="reading-your-rankings" /></h2>
         <div className="flex gap-2 text-xs">
           <button
             onClick={() => setPeriod('week')}

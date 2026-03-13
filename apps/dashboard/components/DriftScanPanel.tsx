@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import LearnMoreLink from './LearnMoreLink';
 
 // ── Types (inlined for Next.js bundler) ──────────────────────────────────────
 
@@ -81,7 +82,7 @@ export default function DriftScanPanel({ site_id }: DriftScanPanelProps) {
 
   return (
     <section className="bg-white border border-slate-200 rounded-xl p-4">
-      <h2 className="text-base font-semibold text-slate-700">Fix Stability Monitor</h2>
+      <h2 className="text-base font-semibold text-slate-700">Fix Stability Monitor<LearnMoreLink article_slug="what-is-fix-drift" /></h2>
       <p className="text-xs text-slate-400 mb-3">
         Detects when site updates overwrite your SEO fixes
       </p>

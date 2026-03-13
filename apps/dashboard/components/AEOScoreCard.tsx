@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import LearnMoreLink from './LearnMoreLink';
 
 // ── Types (inlined for Next.js bundler) ──────────────────────────────────────
 
@@ -78,7 +79,7 @@ export default function AEOScoreCard({ site_id }: AEOScoreCardProps) {
 
   return (
     <section className="bg-white border border-slate-200 rounded-xl p-4">
-      <h3 className="text-sm font-semibold text-slate-700">AEO Score</h3>
+      <h3 className="text-sm font-semibold text-slate-700">AEO Score<LearnMoreLink article_slug="what-is-aeo" /></h3>
       <p className="text-[11px] text-slate-400 mb-3">
         Answer Engine Optimization — readiness for AI search and voice
       </p>
