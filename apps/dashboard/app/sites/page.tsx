@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { getAllSites } from '@/lib/queries';
 import GSCButton from './GSCButton';
+import SuspensionBadge from '@/components/SuspensionBadge';
 
 function HealthBadge({ score }: { score: { total: number; grade: string } }) {
   const color =
@@ -51,13 +52,23 @@ export default async function SitesPage() {
             {sites.map((s) => (
               <tr key={s.site_id} className="hover:bg-slate-50 transition-colors">
                 <td className="px-5 py-3 font-medium">
-                  {s.last_run_id ? (
-                    <Link href={`/runs/${s.last_run_id}`} className="text-blue-600 hover:underline">
-                      {s.site_url}
-                    </Link>
-                  ) : (
-                    <span className="text-slate-700">{s.site_url}</span>
-                  )}
+                  <div className="flex flex-col gap-1">
+                    {s.last_run_id ? (
+                      <Link href={`/runs/${s.last_run_id}`} className="text-blue-600 hover:underline">
+                        {s.site_url}
+                      </Link>
+                    ) : (
+                      <span className="text-slate-700">{s.site_url}</span>
+                    )}
+                    {s.pipeline_suspended && s.pipeline_resume_at && (
+                      <SuspensionBadge
+                        siteId={s.site_id}
+                        suspendedUntil={s.pipeline_resume_at}
+                        consecutiveFailures={s.consecutive_failures ?? 0}
+                        isAdmin={true}
+                      />
+                    )}
+                  </div>
                 </td>
                 <td className="px-5 py-3 text-slate-500 uppercase text-xs">{s.cms_type}</td>
                 <td className="px-5 py-3">

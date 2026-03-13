@@ -13,12 +13,17 @@ export type ExecutionStatus =
 // ── Live DB types (matches actual Supabase schema) ─────────────────────────────
 
 export interface Site {
-  site_id:     string;
-  tenant_id:   string;
-  cms_type:    CmsType;
-  site_url:    string;
-  verified_at: string | null;
-  created_at:  string;
+  site_id:                     string;
+  tenant_id:                   string;
+  cms_type:                    CmsType;
+  site_url:                    string;
+  verified_at:                 string | null;
+  created_at:                  string;
+  pipeline_suspended?:         boolean;
+  pipeline_suspended_at?:      string | null;
+  pipeline_resume_at?:         string | null;
+  pipeline_suspension_reason?: string | null;
+  consecutive_failures?:       number;
 }
 
 /** Matches action_queue live schema columns */
