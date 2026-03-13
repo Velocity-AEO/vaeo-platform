@@ -6,6 +6,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { runTagCleanupJob } from './gsc_tag_cleanup.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -150,6 +151,13 @@ export async function runOverdueSyncs(
       } catch {
         results.push({ site_id: job.site_id, success: false });
       }
+    }
+
+    // Run tag cleanup once daily after sync — non-fatal
+    try {
+      await runTagCleanupJob(24);
+    } catch {
+      // Tag cleanup failure must not block sync results
     }
 
     return results;
