@@ -9,6 +9,7 @@
 import { randomUUID } from 'node:crypto';
 import { runTagCleanupJob } from './gsc_tag_cleanup.js';
 import { cleanExpiredDedupRecords } from '../notifications/notification_dedup.js';
+import { analyzeSiteTrends } from '../sandbox/lighthouse_trend_detector.js';
 import {
   runDeltaSync,
   type DeltaSyncConfig,
@@ -281,6 +282,28 @@ export async function runOverdueSyncs(
       await cleanExpiredDedupRecords();
     } catch {
       // Dedup cleanup failure must not block sync results
+    }
+
+    // Weekly Lighthouse trend analysis (Sunday runs) — non-fatal
+    try {
+      const day = new Date().getDay();
+      if (day === 0) {
+        for (const job of overdue) {
+          try {
+            const siteTrends = await analyzeSiteTrends(job.site_id, 'mobile');
+            if (siteTrends.total_alerts > 0) {
+              // Log for now; notification dispatch handled by caller
+              process.stderr.write(
+                `[LIGHTHOUSE_TREND] site=${job.site_id} alerts=${siteTrends.total_alerts}\n`,
+              );
+            }
+          } catch {
+            // Per-site trend failure must not block other sites
+          }
+        }
+      }
+    } catch {
+      // Trend analysis failure must not block sync results
     }
 
     return results;

@@ -17,6 +17,7 @@ import {
   type WPLighthouseScore,
   type WPLighthouseDelta,
 } from './wp_lighthouse_runner.js';
+import type { ResponseClassification } from './response_classifier.js';
 // Re-export WPLighthouseDelta so existing importers don't break
 export type { WPLighthouseDelta };
 
