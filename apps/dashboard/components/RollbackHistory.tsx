@@ -2,9 +2,20 @@
 
 import { useEffect, useState } from 'react';
 import type { RollbackRecord } from '../../../tools/rollback/rollback_history';
+import { getRollbackWindowLabel } from '../../../tools/rollback/rollback_window_matrix';
 
 interface RollbackHistoryProps {
   site_id: string;
+}
+
+function getWindowColumnLabel(signal_type: string): string {
+  try {
+    const label = getRollbackWindowLabel(signal_type);
+    const typeName = (signal_type ?? '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    return `${typeName} \u2014 ${label} window`;
+  } catch {
+    return '';
+  }
 }
 
 export default function RollbackHistory({ site_id }: RollbackHistoryProps) {
@@ -70,6 +81,9 @@ export default function RollbackHistory({ site_id }: RollbackHistoryProps) {
           <div className="flex-1 min-w-0">
             <p className="text-xs font-medium text-slate-700 truncate">{rec.signal_type}</p>
             <p className="text-xs text-slate-400 truncate">{rec.url}</p>
+            <p className="text-[10px] text-slate-400 mt-0.5">
+              {getWindowColumnLabel(rec.signal_type)}
+            </p>
           </div>
 
           <span className="text-xs text-slate-400 shrink-0">

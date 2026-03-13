@@ -1,31 +1,58 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { canShowRollbackButton, getRollbackStatusMessage, buildRollbackRequest } from '../lib/rollback_api_logic';
 import type { RollbackResult } from '../../../tools/rollback/rollback_engine';
+import {
+  getRollbackWindowLabel,
+  getTimeRemainingInWindow,
+  isWithinRollbackWindow,
+} from '../../../tools/rollback/rollback_window_matrix';
 
 interface RollbackButtonProps {
   fix_id:                 string;
   site_id:                string;
   applied_at:             string;
   original_value:         string | null;
+  issue_type?:            string;
   on_rollback_complete?:  () => void;
 }
 
 type State = 'idle' | 'confirming' | 'loading' | 'success' | 'error';
+
+function getTimeColor(hours: number, expired: boolean): string {
+  if (expired) return 'text-slate-400';
+  if (hours >= 24) return 'text-green-600';
+  if (hours >= 6)  return 'text-yellow-600';
+  return 'text-red-500';
+}
 
 export default function RollbackButton({
   fix_id,
   site_id,
   applied_at,
   original_value,
+  issue_type = '',
   on_rollback_complete,
 }: RollbackButtonProps) {
   const [state, setState] = useState<State>('idle');
   const [errorMsg, setErrorMsg] = useState('');
 
-  // Guard: don't render when rollback is not allowed
-  if (!canShowRollbackButton({ applied_at, original_value })) {
+  const windowLabel = useMemo(() => getRollbackWindowLabel(issue_type), [issue_type]);
+  const timeRemaining = useMemo(
+    () => getTimeRemainingInWindow(applied_at, issue_type),
+    [applied_at, issue_type],
+  );
+  const withinWindow = useMemo(
+    () => isWithinRollbackWindow(applied_at, issue_type),
+    [applied_at, issue_type],
+  );
+
+  // Guard: don't render when rollback is not allowed or window expired
+  if (!canShowRollbackButton({ applied_at, original_value, issue_type })) {
+    return null;
+  }
+  if (!withinWindow || timeRemaining.expired) {
     return null;
   }
 
@@ -79,6 +106,8 @@ export default function RollbackButton({
     setErrorMsg('');
   }
 
+  const timeColor = getTimeColor(timeRemaining.hours, timeRemaining.expired);
+
   if (state === 'confirming') {
     return (
       <div
@@ -107,7 +136,6 @@ export default function RollbackButton({
   if (state === 'loading') {
     return (
       <div className="flex items-center gap-1.5 text-xs text-slate-500">
-        {/* Spinner */}
         <svg className="animate-spin w-3.5 h-3.5" viewBox="0 0 24 24" fill="none">
           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
@@ -120,7 +148,6 @@ export default function RollbackButton({
   if (state === 'success') {
     return (
       <div className="flex items-center gap-1 text-xs text-green-600 font-medium">
-        {/* Checkmark */}
         <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="none">
           <path d="M3 8l3.5 3.5L13 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
@@ -145,29 +172,34 @@ export default function RollbackButton({
 
   // idle
   return (
-    <button
-      onClick={handleUndoClick}
-      className="flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-red-600 transition-colors px-2 py-0.5 border border-gray-200 rounded hover:border-red-300"
-      title="Undo this fix"
-    >
-      {/* Undo icon */}
-      <svg className="w-3 h-3" viewBox="0 0 16 16" fill="none">
-        <path
-          d="M3.5 5.5H9a4 4 0 010 8H4"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-        <path
-          d="M3.5 5.5L1.5 3.5M3.5 5.5L1.5 7.5"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-      Undo Fix
-    </button>
+    <div className="flex flex-col items-end gap-0.5">
+      <button
+        onClick={handleUndoClick}
+        className="flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-red-600 transition-colors px-2 py-0.5 border border-gray-200 rounded hover:border-red-300"
+        title={`Rollback available for ${windowLabel}`}
+      >
+        <svg className="w-3 h-3" viewBox="0 0 16 16" fill="none">
+          <path
+            d="M3.5 5.5H9a4 4 0 010 8H4"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <path
+            d="M3.5 5.5L1.5 3.5M3.5 5.5L1.5 7.5"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+        Undo Fix
+        <span className="text-[10px] text-slate-400 font-normal">({windowLabel})</span>
+      </button>
+      <span className={`text-[10px] ${timeColor}`}>
+        {timeRemaining.label}
+      </span>
+    </div>
   );
 }

@@ -7,6 +7,14 @@
 
 import { buildFixNotification } from '../notifications/fix_notification.js';
 import { dispatchFixNotification, type NotificationDispatchConfig } from '../notifications/notification_dispatcher.js';
+import {
+  getRollbackWindowHours,
+  getRollbackWindowLabel,
+  isWithinRollbackWindow,
+  calculateRollbackDeadline,
+  getTimeRemainingInWindow,
+  type TimeRemaining,
+} from './rollback_window_matrix.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -170,4 +178,85 @@ async function defaultApplyFn(
 
 async function defaultLoadLastFix(_site_id: string): Promise<RollbackTarget | null> {
   return null;
+}
+
+// ── Eligibility ──────────────────────────────────────────────────────────────
+
+export interface RollbackEligibility {
+  eligible:        boolean;
+  reason?:         string;
+  window_hours:    number;
+  window_label:    string;
+  deadline:        string;
+  time_remaining:  TimeRemaining;
+}
+
+/**
+ * Checks if a fix can be rolled back using per-fix-type windows.
+ */
+export function canRollback(
+  fix: { applied_at: string; issue_type: string; original_value: string | null },
+  now?: string,
+): boolean {
+  try {
+    if (fix.original_value === null) return false;
+    return isWithinRollbackWindow(fix.applied_at, fix.issue_type, now);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Returns full rollback eligibility details including window info.
+ */
+export function getRollbackEligibility(
+  fix: { applied_at: string; issue_type: string; original_value: string | null },
+  now?: string,
+): RollbackEligibility {
+  try {
+    const window_hours   = getRollbackWindowHours(fix.issue_type);
+    const window_label   = getRollbackWindowLabel(fix.issue_type);
+    const deadline       = calculateRollbackDeadline(fix.applied_at, fix.issue_type);
+    const time_remaining = getTimeRemainingInWindow(fix.applied_at, fix.issue_type, now);
+
+    if (fix.original_value === null) {
+      return {
+        eligible: false,
+        reason:   'No original value recorded',
+        window_hours,
+        window_label,
+        deadline,
+        time_remaining,
+      };
+    }
+
+    const within = isWithinRollbackWindow(fix.applied_at, fix.issue_type, now);
+    if (!within) {
+      return {
+        eligible: false,
+        reason:   `Rollback window expired (${window_label})`,
+        window_hours,
+        window_label,
+        deadline,
+        time_remaining,
+      };
+    }
+
+    return {
+      eligible: true,
+      window_hours,
+      window_label,
+      deadline,
+      time_remaining,
+    };
+  } catch {
+    return {
+      eligible:       false,
+      reason:         'Unable to determine eligibility',
+      window_hours:   48,
+      window_label:   '48 hours',
+      deadline:       new Date().toISOString(),
+      time_remaining: { hours: 0, minutes: 0, expired: true, label: 'Rollback window expired' },
+    };
+  }
 }

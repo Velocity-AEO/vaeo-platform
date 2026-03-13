@@ -7,6 +7,8 @@ import assert from 'node:assert/strict';
 import {
   rollbackFix,
   rollbackLastFix,
+  canRollback,
+  getRollbackEligibility,
   type RollbackTarget,
   type RollbackResult,
   type RollbackDeps,
@@ -194,5 +196,93 @@ describe('rollbackLastFix', () => {
     });
     assert.equal(result.success, false);
     assert.ok(result.error?.includes('db fail'));
+  });
+});
+
+// ── canRollback ──────────────────────────────────────────────────────────────
+
+describe('canRollback', () => {
+  it('uses issue_type window not hardcoded 48h', () => {
+    // Schema fix applied 3 days ago — within 7-day window
+    const applied_at = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString();
+    assert.equal(canRollback({ applied_at, issue_type: 'SCHEMA_MISSING', original_value: 'v' }), true);
+  });
+
+  it('returns true for schema fix within 7 days', () => {
+    const applied_at = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString();
+    assert.equal(canRollback({ applied_at, issue_type: 'SCHEMA_MISSING', original_value: 'v' }), true);
+  });
+
+  it('returns false for schema fix after 7 days', () => {
+    const applied_at = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString();
+    assert.equal(canRollback({ applied_at, issue_type: 'SCHEMA_MISSING', original_value: 'v' }), false);
+  });
+
+  it('returns false for title fix after 48 hours', () => {
+    const applied_at = new Date(Date.now() - 50 * 60 * 60 * 1000).toISOString();
+    assert.equal(canRollback({ applied_at, issue_type: 'TITLE_MISSING', original_value: 'v' }), false);
+  });
+
+  it('returns true for title fix within 48 hours', () => {
+    const applied_at = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    assert.equal(canRollback({ applied_at, issue_type: 'TITLE_MISSING', original_value: 'v' }), true);
+  });
+
+  it('returns false when original_value is null', () => {
+    const applied_at = new Date().toISOString();
+    assert.equal(canRollback({ applied_at, issue_type: 'TITLE_MISSING', original_value: null }), false);
+  });
+
+  it('never throws on bad input', () => {
+    assert.doesNotThrow(() => canRollback(null as any));
+  });
+});
+
+// ── getRollbackEligibility ───────────────────────────────────────────────────
+
+describe('getRollbackEligibility', () => {
+  it('includes window_hours', () => {
+    const e = getRollbackEligibility({ applied_at: new Date().toISOString(), issue_type: 'SCHEMA_MISSING', original_value: 'v' });
+    assert.equal(e.window_hours, 168);
+  });
+
+  it('includes window_label', () => {
+    const e = getRollbackEligibility({ applied_at: new Date().toISOString(), issue_type: 'SCHEMA_MISSING', original_value: 'v' });
+    assert.equal(e.window_label, '7 days');
+  });
+
+  it('includes deadline as ISO string', () => {
+    const e = getRollbackEligibility({ applied_at: new Date().toISOString(), issue_type: 'TITLE_MISSING', original_value: 'v' });
+    assert.ok(e.deadline.includes('T'));
+  });
+
+  it('includes time_remaining object', () => {
+    const e = getRollbackEligibility({ applied_at: new Date().toISOString(), issue_type: 'TITLE_MISSING', original_value: 'v' });
+    assert.equal(typeof e.time_remaining.hours, 'number');
+    assert.equal(typeof e.time_remaining.minutes, 'number');
+    assert.equal(typeof e.time_remaining.expired, 'boolean');
+    assert.equal(typeof e.time_remaining.label, 'string');
+  });
+
+  it('eligible=true when within window', () => {
+    const e = getRollbackEligibility({ applied_at: new Date().toISOString(), issue_type: 'TITLE_MISSING', original_value: 'v' });
+    assert.equal(e.eligible, true);
+  });
+
+  it('eligible=false when past window', () => {
+    const applied_at = new Date(Date.now() - 200 * 60 * 60 * 1000).toISOString();
+    const e = getRollbackEligibility({ applied_at, issue_type: 'TITLE_MISSING', original_value: 'v' });
+    assert.equal(e.eligible, false);
+    assert.ok(e.reason?.includes('expired'));
+  });
+
+  it('eligible=false when no original value', () => {
+    const e = getRollbackEligibility({ applied_at: new Date().toISOString(), issue_type: 'TITLE_MISSING', original_value: null });
+    assert.equal(e.eligible, false);
+    assert.ok(e.reason?.includes('No original value'));
+  });
+
+  it('never throws on null', () => {
+    assert.doesNotThrow(() => getRollbackEligibility(null as any));
   });
 });

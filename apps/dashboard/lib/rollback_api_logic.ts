@@ -2,13 +2,12 @@
  * apps/dashboard/lib/rollback_api_logic.ts
  *
  * Pure helpers for rollback UI and API layer.
+ * Uses per-fix-type rollback windows from the matrix.
  * Never throws.
  */
 
-import { isRollbackAllowed } from '../../../tools/rollback/rollback_history.js';
+import { isWithinRollbackWindow } from '../../../tools/rollback/rollback_window_matrix.js';
 import type { RollbackResult } from '../../../tools/rollback/rollback_engine.js';
-
-const MAX_ROLLBACK_AGE_HOURS = 48;
 
 // ── buildRollbackRequest ──────────────────────────────────────────────────────
 
@@ -39,14 +38,14 @@ export function getRollbackStatusMessage(result: RollbackResult): string {
 // ── canShowRollbackButton ─────────────────────────────────────────────────────
 
 /**
- * Returns true only when the fix is within rollback window AND has an original value.
+ * Returns true only when the fix is within its per-type rollback window AND has an original value.
  */
 export function canShowRollbackButton(
-  fix: { applied_at: string; original_value: string | null },
+  fix: { applied_at: string; original_value: string | null; issue_type?: string },
 ): boolean {
   try {
     if (fix.original_value === null) return false;
-    return isRollbackAllowed(fix, MAX_ROLLBACK_AGE_HOURS);
+    return isWithinRollbackWindow(fix.applied_at, fix.issue_type ?? '');
   } catch {
     return false;
   }

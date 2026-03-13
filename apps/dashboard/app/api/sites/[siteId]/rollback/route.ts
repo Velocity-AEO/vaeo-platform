@@ -5,13 +5,19 @@
  *   Body: { fix_id?: string }
  *   If fix_id: roll back that specific fix.
  *   If no fix_id: roll back the last fix for the site.
+ *
+ * Uses per-fix-type rollback windows from the matrix.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { rollbackFix, rollbackLastFix, type RollbackTarget } from '../../../../../../tools/rollback/rollback_engine.js';
 import { buildRollbackRecord, getRollbackBlockReason } from '../../../../../../tools/rollback/rollback_history.js';
-
-const MAX_ROLLBACK_AGE_HOURS = 48;
+import {
+  isWithinRollbackWindow,
+  getRollbackWindowHours,
+  getRollbackWindowLabel,
+  calculateRollbackDeadline,
+} from '../../../../../../tools/rollback/rollback_window_matrix.js';
 
 interface RouteContext {
   params: Promise<{ siteId: string }>;
@@ -86,11 +92,26 @@ export async function POST(req: NextRequest, ctx: RouteContext): Promise<NextRes
       };
     }
 
-    // Check rollback eligibility
-    const blockReason = getRollbackBlockReason(target, MAX_ROLLBACK_AGE_HOURS);
-    if (blockReason) {
-      return NextResponse.json({ error: blockReason }, {
+    // Check rollback eligibility using per-type window
+    const issue_type = target.signal_type;
+    const window_hours = getRollbackWindowHours(issue_type);
+
+    // Check original value
+    if (target.original_value === null) {
+      return NextResponse.json({ error: 'No original value recorded for this fix' }, {
         status: 400,
+        headers: { 'Cache-Control': 'no-store' },
+      });
+    }
+
+    // Check per-type window
+    if (!isWithinRollbackWindow(target.applied_at, issue_type)) {
+      return NextResponse.json({
+        error:        'Rollback window expired',
+        window_label: getRollbackWindowLabel(issue_type),
+        deadline:     calculateRollbackDeadline(target.applied_at, issue_type),
+      }, {
+        status: 409,
         headers: { 'Cache-Control': 'no-store' },
       });
     }
