@@ -4,8 +4,21 @@
  * Coordinates HTML snapshot, delta verify, regression monitor,
  * and Lighthouse into a single sandbox run for every WordPress fix.
  *
+ * Mobile-first Lighthouse: mobile is primary (Google ranking signal),
+ * desktop is secondary for comparison.
+ *
  * Injectable deps pattern for testability. Never throws.
  */
+
+import {
+  runWPLighthouseFull,
+  runWPLighthouseDelta,
+  type WPLighthouseFullResult,
+  type WPLighthouseScore,
+  type WPLighthouseDelta,
+} from './wp_lighthouse_runner.js';
+// Re-export WPLighthouseDelta so existing importers don't break
+export type { WPLighthouseDelta };
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -20,13 +33,6 @@ export interface WPSandboxConfig {
   lighthouse_threshold: number;
 }
 
-export interface WPLighthouseDelta {
-  before_score:        number;
-  after_score:         number;
-  delta:               number;
-  regression_detected: boolean;
-}
-
 export interface WPRegressionSignal {
   signal:  string;
   was:     string;
@@ -35,29 +41,38 @@ export interface WPRegressionSignal {
 }
 
 export interface WPSandboxResult {
-  fix_id:                string;
-  url:                   string;
-  site_id:               string;
-  passed:                boolean;
-  html_snapshot_success: boolean;
-  delta_verified:        boolean;
-  regression_passed:     boolean;
-  lighthouse_delta?:     WPLighthouseDelta;
-  regressions?:          WPRegressionSignal[];
-  failure_reasons:       string[];
-  started_at:            string;
-  completed_at:          string;
-  capture_timed_out:     boolean;
-  timed_out_viewports:   number[];
+  fix_id:                      string;
+  url:                         string;
+  site_id:                     string;
+  passed:                      boolean;
+  html_snapshot_success:       boolean;
+  delta_verified:              boolean;
+  regression_passed:           boolean;
+  lighthouse_delta?:           WPLighthouseDelta;
+  /** Mobile score (primary — Google ranking signal) */
+  lighthouse_mobile?:          WPLighthouseScore;
+  /** Desktop score (secondary — for comparison) */
+  lighthouse_desktop?:         WPLighthouseScore;
+  /** desktop.performance - mobile.performance (positive = desktop faster) */
+  lighthouse_mobile_desktop_gap?: number;
+  regressions?:                WPRegressionSignal[];
+  failure_reasons:             string[];
+  started_at:                  string;
+  completed_at:                string;
+  capture_timed_out:           boolean;
+  timed_out_viewports:         number[];
 }
 
 export interface WPSandboxDeps {
-  fetchHTMLFn?:    (url: string) => Promise<string>;
-  deltaVerifyFn?:  (before: string, after: string, issue_type: string, expected_value: string) => Promise<{ verified: boolean; reason?: string }>;
-  regressionFn?:   (before: string, after: string) => Promise<{ passed: boolean; regressions: WPRegressionSignal[] }>;
-  lighthouseFn?:   (url: string) => Promise<{ score: number }>;
+  fetchHTMLFn?:       (url: string) => Promise<string>;
+  deltaVerifyFn?:     (before: string, after: string, issue_type: string, expected_value: string) => Promise<{ verified: boolean; reason?: string }>;
+  regressionFn?:      (before: string, after: string) => Promise<{ passed: boolean; regressions: WPRegressionSignal[] }>;
+  /** Legacy single-score lighthouse (backward compat) */
+  lighthouseFn?:      (url: string) => Promise<{ score: number }>;
+  /** Mobile-first full lighthouse — preferred over lighthouseFn */
+  lighthouseFullFn?:  (url: string) => Promise<WPLighthouseFullResult>;
   viewportCaptureFn?: (url: string) => Promise<{ any_timed_out: boolean; timed_out_viewports: number[] }>;
-  logFn?:          (message: string) => void;
+  logFn?:             (message: string) => void;
 }
 
 // ── Default deps ─────────────────────────────────────────────────────────────
@@ -105,6 +120,9 @@ export async function runWPSandbox(
   let delta_verified = false;
   let regression_passed = true;
   let lighthouse_delta: WPLighthouseDelta | undefined;
+  let lighthouse_mobile: WPLighthouseScore | undefined;
+  let lighthouse_desktop: WPLighthouseScore | undefined;
+  let lighthouse_mobile_desktop_gap: number | undefined;
   let regressions: WPRegressionSignal[] | undefined;
   let capture_timed_out = false;
   let timed_out_viewports: number[] = [];
@@ -125,7 +143,7 @@ export async function runWPSandbox(
     // 2. Run the fix
     try {
       await runFix();
-    } catch (err) {
+    } catch {
       failure_reasons.push('fix_execution_failed');
     }
 
@@ -154,7 +172,6 @@ export async function runWPSandbox(
         failure_reasons.push('delta_verify_failed');
       }
     } else if (config.run_delta_verify && !bothSnapshots) {
-      // Can't verify without both snapshots
       delta_verified = false;
     }
 
@@ -175,27 +192,57 @@ export async function runWPSandbox(
       }
     }
 
-    // 6. Lighthouse delta
+    // 6. Lighthouse delta — mobile-first
     if (config.run_lighthouse) {
       try {
-        const beforeLH = await lighthouseFn(url);
-        // After fix is already applied, so we measure current state
-        const afterLH = await lighthouseFn(url);
-        const delta = afterLH.score - beforeLH.score;
-        const regression_detected = delta < -config.lighthouse_threshold;
-        lighthouse_delta = {
-          before_score: beforeLH.score,
-          after_score:  afterLH.score,
-          delta,
-          regression_detected,
-        };
-        if (regression_detected) {
-          failure_reasons.push('lighthouse_regression');
+        if (deps?.lighthouseFullFn) {
+          // ── Mobile-first path (preferred) ─────────────────────────────────
+          const beforeFull = await deps.lighthouseFullFn(url);
+          const afterFull  = await deps.lighthouseFullFn(url);
+
+          lighthouse_mobile  = afterFull.mobile;
+          lighthouse_desktop = afterFull.desktop ?? undefined;
+          lighthouse_mobile_desktop_gap =
+            typeof afterFull.mobile_desktop_gap === 'number'
+              ? afterFull.mobile_desktop_gap
+              : undefined;
+
+          lighthouse_delta = runWPLighthouseDelta(beforeFull, afterFull, config.lighthouse_threshold);
+
+          log(
+            `[SANDBOX_LIGHTHOUSE] mobile=${afterFull.mobile.performance}` +
+            ` desktop=${afterFull.desktop?.performance ?? '—'}` +
+            ` gap=${afterFull.mobile_desktop_gap ?? '—'}pts url=${url}`,
+          );
+
+          if (lighthouse_delta.regression_detected) {
+            failure_reasons.push('lighthouse_regression');
+          }
+        } else {
+          // ── Legacy single-score path (backward compat) ────────────────────
+          const beforeLH = await lighthouseFn(url);
+          const afterLH  = await lighthouseFn(url);
+          const delta    = afterLH.score - beforeLH.score;
+          const regression_detected = delta < -config.lighthouse_threshold;
+          lighthouse_delta = {
+            before_score:              beforeLH.score,
+            after_score:               afterLH.score,
+            delta,
+            regression_detected,
+            mobile_performance_delta:  null,
+            desktop_performance_delta: null,
+            primary_delta:             null,
+          };
+          if (regression_detected) {
+            failure_reasons.push('lighthouse_regression');
+          }
         }
       } catch {
         failure_reasons.push('lighthouse_check_failed');
       }
+
     }
+
     // 7. Viewport capture timeout check
     if (deps?.viewportCaptureFn) {
       try {
@@ -223,6 +270,9 @@ export async function runWPSandbox(
     delta_verified,
     regression_passed,
     lighthouse_delta,
+    lighthouse_mobile,
+    lighthouse_desktop,
+    lighthouse_mobile_desktop_gap,
     regressions,
     failure_reasons,
     started_at,
