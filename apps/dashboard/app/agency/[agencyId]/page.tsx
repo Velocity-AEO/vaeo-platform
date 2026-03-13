@@ -16,6 +16,10 @@ import {
   getRosterTableRows,
   type AgencyClientSite,
 } from '../../../lib/agency_portal_logic';
+import {
+  getSuspensionDisplayInfo,
+  type SiteSuspensionData,
+} from '../../../lib/suspension_display';
 
 interface AgencyData {
   agency_id:           string;
@@ -148,10 +152,36 @@ export default function AgencyPortalPage() {
                 <td className="py-3 font-medium text-gray-900">{row.domain}</td>
                 <td className="py-3 text-gray-600 capitalize">{row.platform}</td>
                 <td className="py-3 text-gray-600">{row.client_name || '—'}</td>
-                <td className="py-3">
+                <td className="py-3 flex items-center gap-2">
                   <span className={`text-xs font-medium ${row.active ? 'text-green-600' : 'text-gray-400'}`}>
                     {row.active ? 'Active' : 'Inactive'}
                   </span>
+                  {(() => {
+                    const suspensionData: SiteSuspensionData = (row as any);
+                    const info = getSuspensionDisplayInfo(suspensionData);
+                    if (!info.is_suspended) return null;
+                    return (
+                      <span className="inline-flex items-center gap-1">
+                        <span className={`text-xs font-medium px-1.5 py-0.5 rounded ${info.badge_color}`} title={info.tooltip}>
+                          {info.badge_label}
+                        </span>
+                        {info.show_resume && (
+                          <button
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              try {
+                                await fetch(`/api/agency/${agencyId}/sites/${row.site_id}/resume`, { method: 'POST' });
+                                loadData();
+                              } catch { /* silent */ }
+                            }}
+                            className="text-xs text-indigo-600 hover:text-indigo-800 font-medium"
+                          >
+                            Resume Now
+                          </button>
+                        )}
+                      </span>
+                    );
+                  })()}
                 </td>
               </tr>
             ))}
