@@ -46,6 +46,11 @@ import {
   getBillingBlockMessage,
   type BillingEnforcementDeps,
 } from '../billing/billing_enforcement.js';
+import {
+  buildOrphanedPageIssues,
+  prioritizeOrphanedPages,
+  type OrphanedPageIssue,
+} from '../orphaned/orphaned_page_issue_builder.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -72,6 +77,8 @@ export interface LiveRunResult {
   wp_sandbox?:          WPSandboxCounts;
   timed_out_fixes:      number;
   timeout_fix_ids:      string[];
+  orphaned_pages:       OrphanedPageIssue[];
+  orphaned_pages_count: number;
 }
 
 export interface OrchestratorDeps {
@@ -110,6 +117,11 @@ export interface OrchestratorDeps {
   runWPSandbox?: (fix: AggregatedIssue, config: { site_id: string }) => Promise<{ passed: boolean; failure_reasons: string[] }>;
   /** Logger for warnings */
   logWarning?: (message: string) => void;
+  /** Override orphaned page detection for testing */
+  detectOrphanedPagesFn?: (
+    site_id: string,
+    pages: DiscoveredPage[],
+  ) => Array<{ url: string; page_title: string | null; internal_link_count: number }>;
 }
 
 // ── Orchestrator ─────────────────────────────────────────────────────────────
@@ -161,6 +173,8 @@ export async function runLiveProduction(
   let health: SystemHealthReport | null = null;
   let timed_out_fixes  = 0;
   let timeout_fix_ids: string[] = [];
+  let orphaned_pages: OrphanedPageIssue[] = [];
+  let orphaned_pages_count = 0;
 
   try {
     // Billing gate check
@@ -172,7 +186,7 @@ export async function runLiveProduction(
       );
       if (!billingResult.allowed) {
         state = transitionPhase(state, 'failed', getBillingBlockMessage(billingResult));
-        return { state, crawl: emptyCrawl, issues: emptyIssues, fixes: emptyFixes, health: null, timed_out_fixes: 0, timeout_fix_ids: [] };
+        return { state, crawl: emptyCrawl, issues: emptyIssues, fixes: emptyFixes, health: null, timed_out_fixes: 0, timeout_fix_ids: [], orphaned_pages: [], orphaned_pages_count: 0 };
       }
     } catch {
       // Fail open — never block on billing infra error
@@ -183,6 +197,23 @@ export async function runLiveProduction(
     const discover = deps?.discoverPages ?? discoverPages;
     crawl = await discover(target.site_id, target.domain, target.max_pages);
     state = { ...state, pages_crawled: crawl.pages.length };
+
+    // Orphaned page detection (after crawl, before aggregation)
+    try {
+      const ORPHANED_CAP = 20;
+      const logFn = deps?.logWarning ?? ((msg: string) => process.stderr.write(`[orchestrator] ${msg}\n`));
+      const detectFn = deps?.detectOrphanedPagesFn ?? defaultDetectOrphanedPages;
+      const rawOrphaned = detectFn(target.site_id, crawl.pages);
+      const capped = rawOrphaned.slice(0, ORPHANED_CAP);
+      const built = buildOrphanedPageIssues(target.site_id, capped);
+      orphaned_pages = prioritizeOrphanedPages(built);
+      orphaned_pages_count = orphaned_pages.length;
+      if (orphaned_pages_count > 0) {
+        logFn(`[ORPHANED] ${orphaned_pages_count} orphaned pages queued for site ${target.site_id}`);
+      }
+    } catch {
+      // non-fatal — orphaned detection must never block the run
+    }
 
     // Phase 2: Detecting
     state = transitionPhase(state, 'detecting', 'Detecting issues');
@@ -338,7 +369,7 @@ export async function runLiveProduction(
       }
     }
 
-    return { state, crawl, issues, fixes, health, feedback_summary, data_source_summary, wp_sandbox: wpSandbox, timed_out_fixes, timeout_fix_ids };
+    return { state, crawl, issues, fixes, health, feedback_summary, data_source_summary, wp_sandbox: wpSandbox, timed_out_fixes, timeout_fix_ids, orphaned_pages, orphaned_pages_count };
   } catch (err) {
     state = transitionPhase(
       state,
@@ -355,6 +386,34 @@ export async function runLiveProduction(
       // non-fatal
     }
 
-    return { state, crawl, issues, fixes, health, timed_out_fixes: 0, timeout_fix_ids: [] };
+    return { state, crawl, issues, fixes, health, timed_out_fixes: 0, timeout_fix_ids: [], orphaned_pages, orphaned_pages_count };
+  }
+}
+
+// ── Default orphaned page detector ───────────────────────────────────────────
+
+/**
+ * Detects orphaned pages from the crawl result.
+ * A page is orphaned if it has depth > 0 and no other crawled page links to it.
+ * Since DiscoveredPage doesn't track inbound links, we use depth as a proxy:
+ * pages at depth > 1 with no known parent are considered orphaned candidates.
+ * In production, the caller should inject a real detector via detectOrphanedPagesFn.
+ */
+function defaultDetectOrphanedPages(
+  _site_id: string,
+  pages: DiscoveredPage[],
+): Array<{ url: string; page_title: string | null; internal_link_count: number }> {
+  try {
+    if (!Array.isArray(pages)) return [];
+    // Pages that are not the homepage and have depth > 1 are orphan candidates
+    return pages
+      .filter(p => p.depth > 1 && p.page_type !== 'homepage')
+      .map(p => ({
+        url:                 p.url,
+        page_title:          p.title ?? null,
+        internal_link_count: 0,
+      }));
+  } catch {
+    return [];
   }
 }

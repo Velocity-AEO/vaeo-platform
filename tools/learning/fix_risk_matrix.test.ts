@@ -199,8 +199,10 @@ describe('FIX_RISK_MATRIX', () => {
     }
   });
 
-  it('every threshold is between 0 and 1', () => {
+  it('every auto-approvable threshold is between 0 and 1', () => {
     for (const [, profile] of Object.entries(FIX_RISK_MATRIX)) {
+      // Entries with max_auto_approvals_per_day=0 may use threshold > 1 as a "never" sentinel
+      if (profile.max_auto_approvals_per_day === 0) continue;
       assert.ok(profile.auto_approval_threshold > 0 && profile.auto_approval_threshold <= 1);
     }
   });

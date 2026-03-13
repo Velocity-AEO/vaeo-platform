@@ -148,6 +148,17 @@ export const FIX_RISK_MATRIX: Record<string, FixRiskProfile> = {
     'Schema injection modifies structured data — high impact',
   ),
 
+  // ── Never auto-approve ────────────────────────────────────────────────────
+  ORPHANED_PAGE: {
+    issue_type:                 'ORPHANED_PAGE',
+    risk_level:                 'low' as FixRiskLevel,
+    auto_approval_threshold:    1.1, // > 1.0 — mathematically impossible to satisfy
+    requires_sandbox:           false,
+    requires_viewport_qa:       false,
+    max_auto_approvals_per_day: 0,
+    reason:                     'Internal linking requires human judgment — never auto-approve',
+  },
+
   // ── Critical risk (threshold: 0.97) ──────────────────────────────────────
   ROBOTS_NOINDEX: critical(
     'ROBOTS_NOINDEX',

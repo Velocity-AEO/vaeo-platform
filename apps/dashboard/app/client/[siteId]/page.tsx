@@ -11,6 +11,7 @@ import type { FixHistoryPage, FixHistoryEntry } from '@/../tools/stats/fix_histo
 import POVDisclaimer from '@/components/POVDisclaimer';
 import SimulatedDataBanner from '@/components/SimulatedDataBanner';
 import RankingsTrendPanel from '@/components/RankingsTrendPanel';
+import OrphanedPagesPanel from '@/components/OrphanedPagesPanel';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -395,6 +396,9 @@ export default function ClientDashboard() {
           )}
         </div>
       </section>
+
+      {/* Orphaned Pages */}
+      <OrphanedPagesPanel site_id={siteId} />
 
       {/* Fix history table */}
       <section>
