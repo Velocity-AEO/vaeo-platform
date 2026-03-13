@@ -1,7 +1,16 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
+import {
+  generateSessionId,
+  buildInitialOnboardingState,
+  saveOnboardingState,
+  loadOnboardingState,
+  clearOnboardingState,
+  getResumeStep,
+  type OnboardingState as ResumeState,
+} from '../../../tools/onboarding/onboarding_state_store';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -24,6 +33,42 @@ export default function ShopifyOnboardingPage() {
   const [domain, setDomain]   = useState('');
   const [error, setError]     = useState('');
   const [siteId, setSiteId]   = useState('');
+  const [resumed, setResumed] = useState(false);
+  const [sessionId, setSessionId] = useState('');
+
+  // Resume state on mount
+  useEffect(() => {
+    const tenantId = 'default'; // Would come from auth context
+    const sid = generateSessionId(tenantId, 'shopify');
+    setSessionId(sid);
+
+    loadOnboardingState(sid).then(state => {
+      if (state && !state.completed) {
+        const resumeIdx = getResumeStep(state);
+        const resumeStep = STEPS[resumeIdx]?.key ?? 'enter_domain';
+        setStep(resumeStep);
+        if (state.form_data?.domain) setDomain(state.form_data.domain as string);
+        setResumed(true);
+      }
+    }).catch(() => {});
+  }, []);
+
+  // Save state on each step change
+  const saveProgress = useCallback((currentStep: Step) => {
+    if (!sessionId) return;
+    const stepIdx = STEPS.findIndex(s => s.key === currentStep);
+    saveOnboardingState({
+      session_id: sessionId,
+      platform: 'shopify',
+      current_step: stepIdx,
+      total_steps: STEPS.length,
+      completed_steps: Array.from({ length: stepIdx }, (_, i) => i),
+      form_data: { domain },
+      started_at: new Date().toISOString(),
+      last_updated_at: new Date().toISOString(),
+      completed: currentStep === 'complete',
+    }).catch(() => {});
+  }, [sessionId, domain]);
 
   // Check for OAuth callback
   useEffect(() => {
@@ -33,10 +78,11 @@ export default function ShopifyOnboardingPage() {
       const timer = setTimeout(() => {
         setSiteId(`site_${Date.now().toString(36)}`);
         setStep('complete');
+        if (sessionId) clearOnboardingState(sessionId).catch(() => {});
       }, 2000);
       return () => clearTimeout(timer);
     }
-  }, [searchParams]);
+  }, [searchParams, sessionId]);
 
   const stepIdx  = STEPS.findIndex(s => s.key === step);
   const percent  = Math.round((stepIdx / (STEPS.length - 1)) * 100);
@@ -49,6 +95,7 @@ export default function ShopifyOnboardingPage() {
       return;
     }
     setStep('install_app');
+    saveProgress('install_app');
   }
 
   function handleInstall() {
@@ -77,6 +124,24 @@ export default function ShopifyOnboardingPage() {
             style={{ width: `${percent}%` }}
           />
         </div>
+
+        {/* Resume banner */}
+        {resumed && (
+          <div className="bg-blue-50 border border-blue-200 text-blue-700 rounded-lg px-4 py-3 text-sm mb-4 flex items-center justify-between">
+            <span>Resuming your setup from where you left off</span>
+            <button
+              onClick={() => {
+                setResumed(false);
+                setStep('enter_domain');
+                setDomain('');
+                if (sessionId) clearOnboardingState(sessionId).catch(() => {});
+              }}
+              className="text-blue-600 hover:text-blue-800 underline text-xs ml-4"
+            >
+              Start over
+            </button>
+          </div>
+        )}
 
         {/* Error */}
         {error && (

@@ -1,6 +1,13 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
+import {
+  generateSessionId,
+  saveOnboardingState,
+  loadOnboardingState,
+  clearOnboardingState,
+  getResumeStep,
+} from '../../../tools/onboarding/onboarding_state_store';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -98,18 +105,59 @@ export default function WordPressOnboardPage() {
   const [wpUrl, setWpUrl] = useState('');
   const [username, setUsername] = useState('');
   const [appPassword, setAppPassword] = useState('');
+  const [resumed, setResumed] = useState(false);
+  const [sessionId, setSessionId] = useState('');
+
+  // Resume state on mount
+  useEffect(() => {
+    const tenantId = 'default'; // Would come from auth context
+    const sid = generateSessionId(tenantId, 'wordpress');
+    setSessionId(sid);
+
+    loadOnboardingState(sid).then(saved => {
+      if (saved && !saved.completed) {
+        const resumeIdx = getResumeStep(saved);
+        const resumeStep = STEP_ORDER[resumeIdx] ?? 'enter_url';
+        setState(prev => ({ ...prev, step: resumeStep }));
+        if (saved.form_data?.wp_url) setWpUrl(saved.form_data.wp_url as string);
+        if (saved.form_data?.username) setUsername(saved.form_data.username as string);
+        setResumed(true);
+      }
+    }).catch(() => {});
+  }, []);
+
+  // Save state on each step change
+  const saveProgress = useCallback((currentStep: WPOnboardingStep) => {
+    if (!sessionId) return;
+    const stepIdx = STEP_ORDER.indexOf(currentStep);
+    saveOnboardingState({
+      session_id: sessionId,
+      platform: 'wordpress',
+      current_step: stepIdx,
+      total_steps: STEP_ORDER.length,
+      completed_steps: Array.from({ length: stepIdx }, (_, i) => i),
+      form_data: { wp_url: wpUrl, username },
+      started_at: new Date().toISOString(),
+      last_updated_at: new Date().toISOString(),
+      completed: currentStep === 'complete',
+    }).catch(() => {});
+  }, [sessionId, wpUrl, username]);
 
   const advance = useCallback(async (payload: Record<string, string> = {}) => {
     setLoading(true);
     try {
       const result = await callOnboardAPI(state.step, state, payload);
       setState(result.state);
+      saveProgress(result.state.step);
+      if (result.state.step === 'complete' && sessionId) {
+        clearOnboardingState(sessionId).catch(() => {});
+      }
     } catch {
       setState((s) => ({ ...s, error: 'Network error. Please try again.' }));
     } finally {
       setLoading(false);
     }
-  }, [state]);
+  }, [state, saveProgress, sessionId]);
 
   const retry = useCallback(() => {
     setState((s) => ({ ...s, error: undefined }));
@@ -142,6 +190,26 @@ export default function WordPressOnboardPage() {
       </p>
 
       <ProgressBar current={state.step} />
+
+      {/* Resume banner */}
+      {resumed && (
+        <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: 16, marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ color: '#1d4ed8', fontSize: 14 }}>Resuming your setup from where you left off</span>
+          <button
+            onClick={() => {
+              setResumed(false);
+              setState({ step: 'enter_url', connection_verified: false, plugins_detected: [] });
+              setWpUrl('');
+              setUsername('');
+              setAppPassword('');
+              if (sessionId) clearOnboardingState(sessionId).catch(() => {});
+            }}
+            style={{ color: '#2563eb', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline', fontSize: 12 }}
+          >
+            Start over
+          </button>
+        </div>
+      )}
 
       {/* Error banner */}
       {state.error && (
