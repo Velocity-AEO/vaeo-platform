@@ -7,6 +7,8 @@
 import type { FixNotificationEvent, FixNotificationPayload } from './fix_notification.js';
 import { shouldSendImmediately, getNotificationSubject, getNotificationBody } from './fix_notification.js';
 import { checkNotificationDedup, recordNotificationSent, type NotificationDedupDeps } from './notification_dedup.js';
+import { buildDigestSubjectLine, buildDigestEmailHTML, buildDigestEmailText, type DigestEmailData } from './digest_email_template.js';
+import { applyWhiteLabelToDigest, buildFromAddress, loadWhiteLabelConfig, type WhiteLabelEmailConfig, type WhiteLabelEmailDeps } from './digest_white_label.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -30,8 +32,10 @@ export interface NotificationDispatchResult {
 
 export interface NotificationDispatchDeps {
   sendEmailFn?:       (to: string, subject: string, body: string) => Promise<void>;
+  sendHtmlEmailFn?:   (to: string, subject: string, html: string, text: string, from?: string) => Promise<void>;
   scheduleDigestFn?:  (payload: FixNotificationPayload) => Promise<void>;
   dedupDeps?:         NotificationDedupDeps;
+  whiteLabelDeps?:    WhiteLabelEmailDeps;
 }
 
 // ── Default stubs ────────────────────────────────────────────────────────────
@@ -153,3 +157,56 @@ export async function dispatchBatchNotification(
     return [];
   }
 }
+
+// ── dispatchDigestEmail ──────────────────────────────────────────────────────
+
+export async function dispatchDigestEmail(
+  digestData: DigestEmailData,
+  to:         string,
+  config:     NotificationDispatchConfig,
+  deps?:      NotificationDispatchDeps,
+): Promise<NotificationDispatchResult> {
+  try {
+    const sendHtml = deps?.sendHtmlEmailFn ?? defaultSendHtmlEmail;
+
+    // Load and apply white label
+    let data = digestData;
+    try {
+      const wlConfig = await loadWhiteLabelConfig(config.site_id, deps?.whiteLabelDeps);
+      data = applyWhiteLabelToDigest(data, wlConfig);
+    } catch { /* non-fatal */ }
+
+    const subject = buildDigestSubjectLine(data);
+    const html    = buildDigestEmailHTML(data);
+    const text    = buildDigestEmailText(data);
+    const from    = buildFromAddress({
+      agency_name:   data.agency_name,
+      primary_color: data.white_label_color,
+      reply_to:      null,
+      from_name:     data.agency_name,
+    });
+
+    try {
+      await sendHtml(to, subject, html, text, from);
+    } catch { /* never let send failure propagate */ }
+
+    return {
+      event:      'live_run_complete',
+      dispatched: true,
+      method:     'digest',
+    };
+  } catch {
+    return {
+      event:      'live_run_complete',
+      dispatched: false,
+      method:     'skipped',
+      reason:     'digest dispatch error',
+    };
+  }
+}
+
+// ── default HTML email stub ──────────────────────────────────────────────────
+
+async function defaultSendHtmlEmail(
+  _to: string, _subject: string, _html: string, _text: string, _from?: string,
+): Promise<void> {}
