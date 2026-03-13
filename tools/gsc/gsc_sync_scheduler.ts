@@ -11,6 +11,16 @@ import { runTagCleanupJob } from './gsc_tag_cleanup.js';
 import { cleanExpiredDedupRecords } from '../notifications/notification_dedup.js';
 import { analyzeSiteTrends } from '../sandbox/lighthouse_trend_detector.js';
 import { runWeeklyBaselineCapture, type BaselineCaptureResult } from '../sandbox/baseline_scheduler.js';
+import { checkAllExternalLinks, summarizeExternalAudit, type ExternalLinkCheckResult } from '../link_graph/external_link_checker.js';
+import type { ExternalLink } from '../link_graph/link_graph_types.js';
+import {
+  captureVelocitySnapshot,
+  calculateVelocityTrends,
+  type LinkGraph as VelocityLinkGraph,
+  type LinkVelocityTrend,
+} from '../link_graph/link_velocity_tracker.js';
+import type { AuthorityScore } from '../link_graph/authority_scorer.js';
+import type { PageNode } from '../link_graph/types.js';
 import {
   runDeltaSync,
   type DeltaSyncConfig,
@@ -250,10 +260,16 @@ export async function triggerFullSync(
 
 export async function runOverdueSyncs(
   deps?: {
-    loadJobsFn?:         () => Promise<GSCSyncJob[]>;
-    runSyncFn?:          (site_id: string) => Promise<SyncResult>;
-    baselineCaptureFn?:  (site_id: string) => Promise<BaselineCaptureResult>;
-    logFn?:              (msg: string) => void;
+    loadJobsFn?:           () => Promise<GSCSyncJob[]>;
+    runSyncFn?:            (site_id: string) => Promise<SyncResult>;
+    baselineCaptureFn?:    (site_id: string) => Promise<BaselineCaptureResult>;
+    loadExternalLinksFn?:  (site_id: string) => Promise<ExternalLink[]>;
+    externalAuditFn?:      (site_id: string, links: ExternalLink[]) => Promise<ExternalLinkCheckResult[]>;
+    velocityGraphFn?:      (site_id: string) => Promise<VelocityLinkGraph | null>;
+    velocityScoresFn?:     (site_id: string) => Promise<AuthorityScore[]>;
+    velocityPagesFn?:      (site_id: string) => Promise<PageNode[]>;
+    velocityHistoryFn?:    (site_id: string, url: string, limit: number) => Promise<any[]>;
+    logFn?:                (msg: string) => void;
   },
 ): Promise<BatchSyncResult[]> {
   try {
@@ -337,6 +353,77 @@ export async function runOverdueSyncs(
       }
     } catch {
       // Baseline capture failure must not block sync results
+    }
+
+    // Weekly external link audit (Sunday runs) — non-fatal
+    try {
+      const log = deps?.logFn ?? ((msg: string) => process.stderr.write(msg + '\n'));
+      const day = new Date().getDay();
+      if (day === 0) {
+        const loadLinksFn = deps?.loadExternalLinksFn ?? (async () => [] as ExternalLink[]);
+        const auditFn     = deps?.externalAuditFn
+          ?? ((sid: string, links: ExternalLink[]) => checkAllExternalLinks(sid, links));
+
+        for (const job of overdue) {
+          try {
+            const links   = await loadLinksFn(job.site_id);
+            const results = await auditFn(job.site_id, links);
+            const summary = summarizeExternalAudit(results);
+
+            if (summary.broken_count > 0) {
+              log(
+                `[EXTERNAL_AUDIT_ALERT] type=broken_external_links site=${job.site_id} ` +
+                `count=${summary.broken_count} subject="${summary.broken_count} broken external links found"`,
+              );
+            }
+            if (summary.low_value_domain_count > 5) {
+              log(
+                `[EXTERNAL_AUDIT_ALERT] type=low_value_external_links site=${job.site_id} ` +
+                `count=${summary.low_value_domain_count} subject="${summary.low_value_domain_count} links to low-value domains detected"`,
+              );
+            }
+          } catch {
+            // Per-site audit failure must not block other sites
+          }
+        }
+      }
+    } catch {
+      // External audit failure must not block sync results
+    }
+
+    // Weekly link velocity snapshot (Sunday runs) — non-fatal
+    try {
+      const log = deps?.logFn ?? ((msg: string) => process.stderr.write(msg + '\n'));
+      const day = new Date().getDay();
+      if (day === 0) {
+        const loadGraph  = deps?.velocityGraphFn ?? (async () => null as VelocityLinkGraph | null);
+        const loadScores = deps?.velocityScoresFn ?? (async () => [] as AuthorityScore[]);
+        const loadPages  = deps?.velocityPagesFn ?? (async () => [] as PageNode[]);
+        const loadHist   = deps?.velocityHistoryFn ?? (async () => [] as any[]);
+
+        for (const job of overdue) {
+          try {
+            const graph = await loadGraph(job.site_id);
+            const scores = await loadScores(job.site_id);
+            if (graph) {
+              const snapCount = await captureVelocitySnapshot(job.site_id, graph, scores);
+              const pages = await loadPages(job.site_id);
+              const trends = await calculateVelocityTrends(job.site_id, pages, scores, {
+                loadHistoryFn: loadHist,
+              });
+              const alertCount = trends.filter((t: LinkVelocityTrend) => t.alert_required).length;
+
+              log(
+                `[VELOCITY] site=${job.site_id} snapshots=${snapCount} alerts=${alertCount}`,
+              );
+            }
+          } catch {
+            // Per-site velocity failure must not block other sites
+          }
+        }
+      }
+    } catch {
+      // Velocity capture failure must not block sync results
     }
 
     return results;

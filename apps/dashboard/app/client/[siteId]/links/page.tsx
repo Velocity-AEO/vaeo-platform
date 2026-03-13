@@ -5,6 +5,8 @@ import { useParams } from 'next/navigation';
 import LinkTreeMap from '@/components/LinkTreeMap';
 import LinkNodeDetail from '@/components/LinkNodeDetail';
 import LinkGraphExport from '@/components/LinkGraphExport';
+import LinkVelocityPanel from '@/components/LinkVelocityPanel';
+import { getReputationBadge, getBrokenLinkSeverity, formatResponseTime } from '@/lib/external_link_display';
 
 // ── Types (inlined) ──────────────────────────────────────────────────────────
 
@@ -36,7 +38,27 @@ interface AnalysisData {
   redirect_chains: RedirectChain[];
 }
 
-type TabKey = 'treemap' | 'orphaned' | 'dead_ends' | 'deep' | 'redirects' | 'anchors' | 'opportunities' | 'external';
+type DomainReputation = 'trusted' | 'unknown' | 'low_value' | 'spammy' | 'unchecked';
+interface ExternalCheckResult {
+  url: string; destination_url: string; destination_domain: string;
+  status_code: number | null; is_broken: boolean; is_redirect: boolean;
+  final_url: string | null; redirect_hops: number; response_time_ms: number;
+  is_nofollow: boolean; domain_reputation: DomainReputation;
+  check_error: string | null; checked_at: string;
+}
+interface ExternalAuditData {
+  results: ExternalCheckResult[];
+  summary: {
+    total_checked: number; broken_count: number; redirect_count: number;
+    low_value_domain_count: number; trusted_domain_count: number;
+    domains_by_link_count: Array<{ domain: string; count: number }>;
+  };
+}
+
+interface CanonicalConflict { source_url: string; linked_url: string; canonical_url: string | null; conflict_type: string; equity_impact: string; fix_action: string; fix_href: string | null; description: string; }
+interface LinkLimitViolation { url: string; title: string | null; total_links: number; over_limit_by: number; severity: string; recommendations: string[]; }
+
+type TabKey = 'treemap' | 'orphaned' | 'dead_ends' | 'deep' | 'redirects' | 'canonical' | 'anchors' | 'link_limits' | 'opportunities' | 'velocity' | 'external';
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'treemap', label: 'Tree Map' },
@@ -44,8 +66,11 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'dead_ends', label: 'Dead Ends' },
   { key: 'deep', label: 'Deep Pages' },
   { key: 'redirects', label: 'Redirect Chains' },
+  { key: 'canonical', label: 'Canonical Conflicts' },
   { key: 'anchors', label: 'Anchor Text' },
+  { key: 'link_limits', label: 'Link Limits' },
   { key: 'opportunities', label: 'Link Opportunities' },
+  { key: 'velocity', label: 'Velocity' },
   { key: 'external', label: 'External Links' },
 ];
 
@@ -55,19 +80,49 @@ export default function LinksPage() {
 
   const [graph, setGraph] = useState<LinkGraph | null>(null);
   const [analysis, setAnalysis] = useState<AnalysisData | null>(null);
+  const [externalAudit, setExternalAudit] = useState<ExternalAuditData | null>(null);
+  const [fixConfirm, setFixConfirm] = useState<string | null>(null);
   const [tab, setTab] = useState<TabKey>('treemap');
   const [selectedNode, setSelectedNode] = useState<PageNode | null>(null);
   const [error, setError] = useState(false);
+  const [canonicalConflicts, setCanonicalConflicts] = useState<CanonicalConflict[]>([]);
+  const [canonicalSummary, setCanonicalSummary] = useState<{ total_conflicts: number; high_impact_count: number; fixable_count: number }>({ total_conflicts: 0, high_impact_count: 0, fixable_count: 0 });
+  const [linkLimitViolations, setLinkLimitViolations] = useState<LinkLimitViolation[]>([]);
 
   useEffect(() => {
     if (!siteId) return;
     Promise.all([
       fetch(`/api/sites/${siteId}/link-graph`).then((r) => r.ok ? r.json() : null),
       fetch(`/api/sites/${siteId}/link-graph/analysis`).then((r) => r.ok ? r.json() : null),
+      fetch(`/api/sites/${siteId}/link-graph/canonical-conflicts`).then((r) => r.ok ? r.json() : null),
+      fetch(`/api/sites/${siteId}/link-graph/link-limits`).then((r) => r.ok ? r.json() : null),
     ])
-      .then(([g, a]) => { setGraph(g); setAnalysis(a); })
+      .then(([g, a, cc, ll]) => {
+        setGraph(g); setAnalysis(a);
+        if (cc) { setCanonicalConflicts(cc.conflicts ?? []); setCanonicalSummary({ total_conflicts: cc.total_conflicts ?? 0, high_impact_count: cc.high_impact_count ?? 0, fixable_count: cc.fixable_count ?? 0 }); }
+        if (ll) setLinkLimitViolations(ll.violations ?? []);
+      })
       .catch(() => setError(true));
   }, [siteId]);
+
+  useEffect(() => {
+    if (!siteId || tab !== 'external') return;
+    fetch(`/api/sites/${siteId}/link-graph/external-audit`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => { if (d) setExternalAudit(d); })
+      .catch(() => {});
+  }, [siteId, tab]);
+
+  async function applyFix(fix: { fix_type: string; source_url: string; original_href: string; replacement_href: string | null }) {
+    try {
+      await fetch(`/api/sites/${siteId}/link-graph/fix-external`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fix }),
+      });
+      setFixConfirm(null);
+    } catch { /* non-fatal */ }
+  }
 
   if (error) {
     return <div className="p-6 text-sm text-red-500">Failed to load link graph.</div>;
@@ -326,9 +381,146 @@ export default function LinksPage() {
           </div>
         )}
 
+        {tab === 'canonical' && (
+          <div>
+            <div className="flex gap-4 mb-4 text-xs">
+              <span className="text-red-600"><strong>{canonicalSummary.high_impact_count}</strong> High Impact</span>
+              <span className="text-green-600"><strong>{canonicalSummary.fixable_count}</strong> Auto-fixable</span>
+              <span className="text-slate-500"><strong>{canonicalSummary.total_conflicts}</strong> Total</span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-left text-slate-400 border-b">
+                    <th className="pb-2 pr-3">Source Page</th>
+                    <th className="pb-2 pr-3">Linked URL</th>
+                    <th className="pb-2 pr-3">Canonical</th>
+                    <th className="pb-2 pr-3">Type</th>
+                    <th className="pb-2 pr-3">Impact</th>
+                    <th className="pb-2">Fix</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {canonicalConflicts.map((c, i) => (
+                    <tr key={i} className="border-b border-slate-100 text-slate-600">
+                      <td className="py-2 pr-3 truncate max-w-[160px]">{c.source_url.replace(/^https?:\/\//, '')}</td>
+                      <td className="py-2 pr-3 truncate max-w-[160px]">{c.linked_url.replace(/^https?:\/\//, '')}</td>
+                      <td className="py-2 pr-3 truncate max-w-[160px]">{c.canonical_url?.replace(/^https?:\/\//, '') ?? '—'}</td>
+                      <td className="py-2 pr-3">{c.conflict_type.replace(/_/g, ' ')}</td>
+                      <td className="py-2 pr-3"><span className={c.equity_impact === 'high' ? 'text-red-600' : c.equity_impact === 'medium' ? 'text-orange-600' : 'text-yellow-600'}>{c.equity_impact}</span></td>
+                      <td className="py-2">{c.fix_action === 'update_link_to_canonical' ? <button className="px-2 py-0.5 text-xs bg-blue-50 text-blue-700 rounded border border-blue-200 hover:bg-blue-100">Update Link</button> : <span className="text-slate-400">{c.fix_action === 'investigate' ? 'Review' : 'Add Canonical'}</span>}</td>
+                    </tr>
+                  ))}
+                  {canonicalConflicts.length === 0 && (
+                    <tr><td colSpan={6} className="py-4 text-slate-400 text-center">No canonical conflicts found</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {tab === 'link_limits' && (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="text-left text-slate-400 border-b">
+                  <th className="pb-2 pr-3">URL</th>
+                  <th className="pb-2 pr-3">Title</th>
+                  <th className="pb-2 pr-3">Total Links</th>
+                  <th className="pb-2 pr-3">Over By</th>
+                  <th className="pb-2 pr-3">Severity</th>
+                  <th className="pb-2">Recommendations</th>
+                </tr>
+              </thead>
+              <tbody>
+                {linkLimitViolations.map((v, i) => (
+                  <tr key={i} className="border-b border-slate-100 text-slate-600">
+                    <td className="py-2 pr-3 truncate max-w-[200px]">{v.url.replace(/^https?:\/\//, '')}</td>
+                    <td className="py-2 pr-3 truncate max-w-[150px]">{v.title ?? '—'}</td>
+                    <td className="py-2 pr-3">{v.total_links}</td>
+                    <td className="py-2 pr-3">+{v.over_limit_by}</td>
+                    <td className="py-2 pr-3"><span className={v.severity === 'critical' ? 'text-red-600' : v.severity === 'high' ? 'text-orange-600' : 'text-yellow-600'}>{v.severity}</span></td>
+                    <td className="py-2">{v.recommendations.length > 0 ? <ul className="space-y-0.5">{v.recommendations.map((r, j) => <li key={j}>• {r}</li>)}</ul> : '—'}</td>
+                  </tr>
+                ))}
+                {linkLimitViolations.length === 0 && (
+                  <tr><td colSpan={6} className="py-4 text-slate-400 text-center">No link limit violations found</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {tab === 'velocity' && (
+          <LinkVelocityPanel site_id={siteId} />
+        )}
+
         {tab === 'external' && (
-          <div className="text-sm text-slate-400 text-center py-8">
-            External link analysis will appear here after the next crawl.
+          <div className="space-y-6">
+            {externalAudit?.summary && (
+              <div className="flex flex-wrap gap-4 text-sm">
+                <span className="text-red-600 font-semibold">{externalAudit.summary.broken_count} Broken</span>
+                <span className="text-yellow-600 font-semibold">{externalAudit.summary.redirect_count} Redirected</span>
+                <span className="text-orange-600 font-semibold">{externalAudit.summary.low_value_domain_count} Low-value</span>
+                <span className="text-green-600 font-semibold">{externalAudit.summary.trusted_domain_count} Trusted</span>
+              </div>
+            )}
+            {externalAudit && (
+              <div>
+                <h3 className="text-xs font-semibold text-slate-500 uppercase mb-2">Domains</h3>
+                <table className="w-full text-xs">
+                  <thead><tr className="text-left text-slate-400 border-b"><th className="pb-2 pr-3">Domain</th><th className="pb-2 pr-3">Links</th><th className="pb-2 pr-3">Reputation</th><th className="pb-2">Status</th></tr></thead>
+                  <tbody>
+                    {[...externalAudit.results].filter((r,i,arr)=>arr.findIndex(x=>x.destination_domain===r.destination_domain)===i).sort((a,b)=>{if(a.is_broken&&!b.is_broken)return -1;if(!a.is_broken&&b.is_broken)return 1;if(a.domain_reputation==='low_value'&&b.domain_reputation!=='low_value')return -1;return 0;}).map((r)=>{
+                      const badge=getReputationBadge(r.domain_reputation);
+                      const count=externalAudit.summary.domains_by_link_count.find(d=>d.domain===r.destination_domain)?.count??1;
+                      return(<tr key={r.destination_domain} className="border-b border-slate-100 text-slate-600"><td className="py-2 pr-3 font-mono">{r.destination_domain}</td><td className="py-2 pr-3">{count}</td><td className="py-2 pr-3 font-medium">{badge.label}</td><td className="py-2">{r.is_broken?<span className="text-red-600">Broken</span>:r.is_redirect?<span className="text-yellow-600">Redirect</span>:<span className="text-slate-400">OK</span>}</td></tr>);
+                    })}
+                    {externalAudit.results.length===0&&(<tr><td colSpan={4} className="py-4 text-slate-400 text-center">No external links audited yet</td></tr>)}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {externalAudit&&externalAudit.results.filter(r=>r.is_broken).length>0&&(
+              <div>
+                <h3 className="text-xs font-semibold text-slate-500 uppercase mb-2">Broken Links</h3>
+                <table className="w-full text-xs">
+                  <thead><tr className="text-left text-slate-400 border-b"><th className="pb-2 pr-3">Source Page</th><th className="pb-2 pr-3">Destination</th><th className="pb-2 pr-3">Status</th><th className="pb-2 pr-3">Error</th><th className="pb-2">Fix</th></tr></thead>
+                  <tbody>
+                    {externalAudit.results.filter(r=>r.is_broken).map((r,i)=>(
+                      <tr key={i} className="border-b border-slate-100 text-slate-600"><td className="py-2 pr-3 truncate max-w-xs">{r.url.replace(/^https?:\/\//,'')}</td><td className="py-2 pr-3 truncate max-w-xs">{r.destination_url.replace(/^https?:\/\//,'')}</td><td className="py-2 pr-3">{r.status_code??'—'}</td><td className="py-2 pr-3">{r.check_error??'—'}</td>
+                      <td className="py-2">{fixConfirm===`broken-${i}`?(<span className="flex gap-1"><button onClick={()=>applyFix({fix_type:'remove_link',source_url:r.url,original_href:r.destination_url,replacement_href:null})} className="text-red-600 underline text-xs">Confirm</button><button onClick={()=>setFixConfirm(null)} className="text-slate-400 text-xs">Cancel</button></span>):(<button onClick={()=>setFixConfirm(`broken-${i}`)} className="px-2 py-0.5 text-xs bg-red-50 text-red-700 rounded border border-red-200">Remove Link</button>)}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {externalAudit&&externalAudit.results.filter(r=>r.is_redirect).length>0&&(
+              <div>
+                <h3 className="text-xs font-semibold text-slate-500 uppercase mb-2">Redirect Chains</h3>
+                <table className="w-full text-xs">
+                  <thead><tr className="text-left text-slate-400 border-b"><th className="pb-2 pr-3">Source Page</th><th className="pb-2 pr-3">Current Href</th><th className="pb-2 pr-3">Final URL</th><th className="pb-2 pr-3">Hops</th><th className="pb-2">Fix</th></tr></thead>
+                  <tbody>
+                    {externalAudit.results.filter(r=>r.is_redirect).map((r,i)=>(
+                      <tr key={i} className="border-b border-slate-100 text-slate-600"><td className="py-2 pr-3 truncate max-w-[140px]">{r.url.replace(/^https?:\/\//,'')}</td><td className="py-2 pr-3 truncate max-w-[140px]">{r.destination_url.replace(/^https?:\/\//,'')}</td><td className="py-2 pr-3 truncate max-w-[140px]">{(r.final_url??'').replace(/^https?:\/\//,'')}</td><td className="py-2 pr-3">{r.redirect_hops}</td><td className="py-2">{r.final_url&&(<button onClick={()=>applyFix({fix_type:'update_to_final_url',source_url:r.url,original_href:r.destination_url,replacement_href:r.final_url})} className="px-2 py-0.5 text-xs bg-yellow-50 text-yellow-700 rounded border border-yellow-200">Update to Final URL</button>)}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {externalAudit&&externalAudit.results.filter(r=>r.domain_reputation==='low_value'&&!r.is_nofollow).length>0&&(
+              <div>
+                <h3 className="text-xs font-semibold text-slate-500 uppercase mb-2">Low-value Domains</h3>
+                <div className="space-y-1">
+                  {[...new Set(externalAudit.results.filter(r=>r.domain_reputation==='low_value'&&!r.is_nofollow).map(r=>r.destination_domain))].map((domain)=>{
+                    const count=externalAudit.results.filter(r=>r.destination_domain===domain).length;
+                    return(<div key={domain} className="flex items-center gap-3 p-2 bg-orange-50 border border-orange-100 rounded text-xs"><span className="font-mono text-orange-800 flex-1">{domain}</span><span className="text-orange-600">{count} link{count!==1?'s':''}</span><button onClick={()=>externalAudit.results.filter(r=>r.destination_domain===domain&&!r.is_nofollow).forEach(r=>applyFix({fix_type:'add_nofollow',source_url:r.url,original_href:r.destination_url,replacement_href:r.destination_url}))} className="px-2 py-0.5 bg-orange-100 text-orange-700 rounded border border-orange-200">Add nofollow</button></div>);
+                  })}
+                </div>
+              </div>
+            )}
+            {!externalAudit&&(<div className="text-sm text-slate-400 text-center py-8">Loading external link audit…</div>)}
           </div>
         )}
 
