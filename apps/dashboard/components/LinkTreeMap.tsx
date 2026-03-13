@@ -83,6 +83,7 @@ export default function LinkTreeMap({
   const [zoom, setZoom] = useState({ x: 0, y: 0, scale: 1 });
   const [dragging, setDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [exporting, setExporting] = useState(false);
   const positionsRef = useRef<Map<string, { x: number; y: number }>>(new Map());
 
   const scoreMap = new Map(authority_scores.map((s) => [s.url, s]));
@@ -307,6 +308,40 @@ export default function LinkTreeMap({
     });
   }
 
+  function exportAsPNG() {
+    try {
+      setExporting(true);
+      const canvas = canvasRef.current;
+      if (!canvas) { setExporting(false); return; }
+
+      // Create 2x retina canvas
+      const scale  = 2;
+      const out    = document.createElement('canvas');
+      out.width    = canvas.width  * scale;
+      out.height   = canvas.height * scale;
+      const ctx    = out.getContext('2d');
+      if (!ctx) { setExporting(false); return; }
+      ctx.scale(scale, scale);
+      ctx.drawImage(canvas, 0, 0);
+
+      out.toBlob((blob) => {
+        try {
+          if (!blob) return;
+          const url = URL.createObjectURL(blob);
+          const a   = document.createElement('a');
+          a.href    = url;
+          a.download = `vaeo-link-graph-${site_id}-${new Date().toISOString().slice(0, 10)}.png`;
+          a.click();
+          URL.revokeObjectURL(url);
+        } catch { /* non-fatal */ } finally {
+          setExporting(false);
+        }
+      }, 'image/png');
+    } catch {
+      setExporting(false);
+    }
+  }
+
   try {
     return (
       <div className="relative">
@@ -347,6 +382,16 @@ export default function LinkTreeMap({
               {f === 'all' ? 'All Links' : f === 'body' ? 'Body Links' : f === 'nav' ? 'Nav Links' : 'Footer Links'}
             </button>
           ))}
+
+          <span className="w-px h-6 bg-slate-200 self-center" />
+
+          <button
+            onClick={exportAsPNG}
+            disabled={exporting}
+            className="px-3 py-1 text-xs rounded-full border border-slate-300 text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+          >
+            {exporting ? 'Exporting…' : 'Export PNG'}
+          </button>
         </div>
 
         {/* Canvas */}

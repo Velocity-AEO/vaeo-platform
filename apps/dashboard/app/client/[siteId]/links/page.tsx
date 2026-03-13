@@ -88,6 +88,7 @@ export default function LinksPage() {
   const [canonicalConflicts, setCanonicalConflicts] = useState<CanonicalConflict[]>([]);
   const [canonicalSummary, setCanonicalSummary] = useState<{ total_conflicts: number; high_impact_count: number; fixable_count: number }>({ total_conflicts: 0, high_impact_count: 0, fixable_count: 0 });
   const [linkLimitViolations, setLinkLimitViolations] = useState<LinkLimitViolation[]>([]);
+  const [showExport, setShowExport] = useState(false);
 
   useEffect(() => {
     if (!siteId) return;
@@ -164,8 +165,10 @@ export default function LinksPage() {
   try {
     return (
       <div className="max-w-7xl mx-auto px-4 py-6">
-        {/* Summary bar */}
-        <div className="flex flex-wrap gap-4 mb-4 text-sm">
+        {/* Page header with export button */}
+        <div className="relative flex items-start justify-between mb-4">
+          {/* Summary bar */}
+          <div className="flex flex-wrap gap-4 text-sm">
           <button onClick={() => setTab('treemap')} className="text-slate-600 hover:text-blue-600">
             <strong>{nodes.length}</strong> Pages
           </button>
@@ -184,6 +187,26 @@ export default function LinksPage() {
           <button onClick={() => setTab('opportunities')} className="text-blue-600 hover:underline">
             <strong>{suggestionsCount}</strong> Opportunities
           </button>
+          </div>
+
+          {/* Export dropdown button */}
+          <div className="relative ml-4 flex-shrink-0">
+            <button
+              onClick={() => setShowExport((v) => !v)}
+              className="px-3 py-1.5 text-xs font-medium border border-slate-200 rounded-md bg-white hover:bg-slate-50 text-slate-600 flex items-center gap-1"
+            >
+              Export Data ↓
+            </button>
+            {showExport && (
+              <div className="absolute right-0 top-full mt-1 w-80 z-50 bg-white border border-slate-200 rounded-lg shadow-lg p-4">
+                <LinkGraphExport
+                  site_id={siteId}
+                  graph={graph}
+                  suggestions={suggestions.map((s) => ({ source_url: s.source_url, destination_url: s.destination_url, suggested_anchor: s.suggested_anchor ?? '', priority: s.priority, reason: s.reason ?? '' }))}
+                />
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Tabs */}

@@ -18,6 +18,14 @@ export interface AgencyClientHealth {
   gsc_connected: boolean;
 }
 
+export interface AgencyLinkHealthSection {
+  total_orphaned_pages:          number;
+  total_broken_external:         number;
+  sites_with_velocity_alerts:    number;
+  top_opportunity_sites:         Array<{ site_id: string; opportunity_count: number }>;
+  sites_with_graph:              number;
+}
+
 export interface AgencyReport {
   agency_id:            string;
   period:               AgencyReportPeriod;
@@ -31,6 +39,7 @@ export interface AgencyReport {
   sites_declined:       number;
   gsc_connected_count:  number;
   drift_summary?:       AgencyDriftSummary;
+  link_health?:         AgencyLinkHealthSection;
 }
 
 // ── getTopFixTypes ────────────────────────────────────────────────────────────
@@ -230,6 +239,20 @@ export function formatAgencyReport(report: AgencyReport): string {
         lines.push(`  Most Common Cause: ${report.drift_summary.most_common_cause}`);
       }
       lines.push(`  Fixes Requeued: ${report.drift_summary.fixes_requeued}`);
+    }
+    if (report.link_health && report.link_health.sites_with_graph > 0) {
+      lines.push('');
+      lines.push('Link Graph Health:');
+      lines.push(`  Sites With Graph: ${report.link_health.sites_with_graph}`);
+      lines.push(`  Total Orphaned Pages: ${report.link_health.total_orphaned_pages}`);
+      lines.push(`  Total Broken External Links: ${report.link_health.total_broken_external}`);
+      lines.push(`  Sites With Velocity Alerts: ${report.link_health.sites_with_velocity_alerts}`);
+      if (report.link_health.top_opportunity_sites.length > 0) {
+        lines.push('  Top Sites By Opportunities:');
+        for (const s of report.link_health.top_opportunity_sites.slice(0, 3)) {
+          lines.push(`    ${s.site_id}: ${s.opportunity_count} opportunities`);
+        }
+      }
     }
     return lines.join('\n');
   } catch {

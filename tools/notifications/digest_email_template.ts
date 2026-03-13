@@ -8,6 +8,32 @@
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
+export interface DigestLinkGraphHealth {
+  total_pages:                number;
+  orphaned_count:             number;
+  dead_end_count:             number;
+  sitemap_discrepancy_count:  number;
+  velocity_alerts?: Array<{
+    url:     string;
+    change:  number;
+    gaining: boolean;
+  }>;
+  opportunities?: Array<{
+    priority:   string;
+    source_url: string;
+    dest_url:   string;
+  }>;
+  broken_external?: Array<{
+    source_url:  string;
+    dest_url:    string;
+    status_code: number | null;
+  }>;
+  canonical_conflicts?: {
+    high_impact_count: number;
+  };
+  site_id: string;
+}
+
 export interface DigestEmailData {
   site_domain:          string;
   period_label:         string;
@@ -28,6 +54,7 @@ export interface DigestEmailData {
   white_label_color:    string | null;
   unsubscribe_url:      string;
   dashboard_url:        string;
+  link_graph_health?:   DigestLinkGraphHealth;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -185,6 +212,67 @@ ${changeHtml ? `<div style="margin-top:8px;">${changeHtml}</div>` : ''}
 </td></tr>`);
     }
 
+    // Link graph health section
+    const lg = data.link_graph_health;
+    if (lg && (lg.total_pages > 0 || lg.orphaned_count > 0)) {
+      const linksUrl = escapeHtml(`${data.dashboard_url || '#'}/links`.replace('/undefined/', '/'));
+      parts.push(`<tr><td style="padding:0 32px 20px;">
+<h2 style="margin:0 0 12px;font-size:15px;color:#1e293b;font-weight:600;">Link Graph Health</h2>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f8fafc;border-radius:10px;border:1px solid #e2e8f0;">
+<tr><td style="padding:16px 20px;">
+<p style="margin:0 0 6px;font-size:13px;color:#334155;">&#128440; ${lg.total_pages} pages mapped</p>
+<p style="margin:0 0 6px;font-size:13px;color:${lg.orphaned_count > 0 ? '#dc2626' : '#64748b'};">${lg.orphaned_count > 0 ? '&#9888;&#65039;' : '&#9989;'} ${lg.orphaned_count} orphaned</p>
+<p style="margin:0 0 6px;font-size:13px;color:${lg.dead_end_count > 0 ? '#ea580c' : '#64748b'};">${lg.dead_end_count > 0 ? '&#9888;&#65039;' : '&#9989;'} ${lg.dead_end_count} dead ends</p>
+<p style="margin:0;font-size:13px;color:${lg.sitemap_discrepancy_count > 0 ? '#ca8a04' : '#64748b'};">${lg.sitemap_discrepancy_count > 0 ? '&#9888;&#65039;' : '&#9989;'} ${lg.sitemap_discrepancy_count} sitemap gaps</p>
+</td></tr></table>`);
+
+      // Velocity block
+      const velGaining = (lg.velocity_alerts ?? []).filter((v) => v.gaining).slice(0, 3);
+      const velLosing  = (lg.velocity_alerts ?? []).filter((v) => !v.gaining).slice(0, 3);
+      if (velGaining.length > 0 || velLosing.length > 0) {
+        parts.push(`<h3 style="margin:12px 0 8px;font-size:13px;color:#475569;font-weight:600;">Link Authority Changes This Week</h3>`);
+        for (const v of velGaining) {
+          parts.push(`<p style="margin:0 0 4px;font-size:12px;color:#16a34a;">&uarr; ${escapeHtml(truncateUrl(v.url))} +${v.change} links</p>`);
+        }
+        for (const v of velLosing) {
+          parts.push(`<p style="margin:0 0 4px;font-size:12px;color:#dc2626;">&darr; ${escapeHtml(truncateUrl(v.url))} ${v.change} links</p>`);
+        }
+      }
+
+      // Opportunities block
+      const topOpps = (lg.opportunities ?? []).slice(0, 3);
+      if (topOpps.length > 0) {
+        parts.push(`<h3 style="margin:12px 0 8px;font-size:13px;color:#475569;font-weight:600;">Top Link Opportunities</h3>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-radius:6px;overflow:hidden;border:1px solid #e2e8f0;">`);
+        topOpps.forEach((opp, i) => {
+          const rowBg = i % 2 === 0 ? '#ffffff' : '#f8fafc';
+          parts.push(`<tr style="background:${rowBg};"><td style="padding:8px 12px;font-size:12px;color:#64748b;">${escapeHtml(opp.priority)}</td><td style="padding:8px 12px;font-size:11px;color:#94a3b8;font-family:monospace;">${escapeHtml(truncateUrl(opp.source_url))}</td><td style="padding:8px 12px;font-size:11px;color:#94a3b8;font-family:monospace;">${escapeHtml(truncateUrl(opp.dest_url))}</td></tr>`);
+        });
+        parts.push(`</table>`);
+      }
+
+      // Broken external block
+      const brokenExt = (lg.broken_external ?? []).slice(0, 3);
+      if (brokenExt.length > 0) {
+        parts.push(`<p style="margin:12px 0 8px;font-size:13px;color:#dc2626;font-weight:600;">&#9888;&#65039; ${lg.broken_external?.length ?? brokenExt.length} broken external links detected</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-radius:6px;overflow:hidden;border:1px solid #fecaca;">`);
+        brokenExt.forEach((b, i) => {
+          const rowBg = i % 2 === 0 ? '#fff5f5' : '#ffffff';
+          parts.push(`<tr style="background:${rowBg};"><td style="padding:8px 12px;font-size:11px;color:#94a3b8;font-family:monospace;">${escapeHtml(truncateUrl(b.source_url))}</td><td style="padding:8px 12px;font-size:11px;color:#dc2626;font-family:monospace;">${escapeHtml(truncateUrl(b.dest_url))}</td><td style="padding:8px 12px;font-size:11px;color:#dc2626;">${b.status_code ?? 'error'}</td></tr>`);
+        });
+        parts.push(`</table>`);
+      }
+
+      // Canonical conflicts block
+      if ((lg.canonical_conflicts?.high_impact_count ?? 0) > 0) {
+        parts.push(`<p style="margin:12px 0 0;font-size:13px;color:#dc2626;font-weight:600;">&#9888;&#65039; ${lg.canonical_conflicts!.high_impact_count} canonical conflicts detected</p>
+<p style="margin:4px 0 0;font-size:12px;color:#64748b;">These links are sending equity to non-canonical URLs</p>`);
+      }
+
+      parts.push(`<p style="margin:12px 0 0;"><a href="${linksUrl}" style="font-size:13px;color:${color};text-decoration:none;font-weight:600;">View Full Link Graph &rarr;</a></p>
+</td></tr>`);
+    }
+
     // CTA button
     const dashUrl = escapeHtml(data.dashboard_url || '#');
     parts.push(`<tr><td style="padding:0 32px 28px;text-align:center;">
@@ -248,6 +336,22 @@ export function buildDigestEmailText(data: DigestEmailData): string {
 
     if (data.biggest_ranking_gain) {
       lines.push(`Ranking gain: "${data.biggest_ranking_gain.keyword}" moved up ${data.biggest_ranking_gain.change} positions`);
+      lines.push('');
+    }
+
+    const lg = data.link_graph_health;
+    if (lg && (lg.total_pages > 0 || lg.orphaned_count > 0)) {
+      lines.push('Link Graph Health:');
+      lines.push(`  ${lg.total_pages} pages mapped`);
+      if (lg.orphaned_count > 0) lines.push(`  ${lg.orphaned_count} orphaned pages`);
+      if (lg.dead_end_count > 0) lines.push(`  ${lg.dead_end_count} dead ends`);
+      if (lg.sitemap_discrepancy_count > 0) lines.push(`  ${lg.sitemap_discrepancy_count} sitemap gaps`);
+      const brokenExt = lg.broken_external ?? [];
+      if (brokenExt.length > 0) lines.push(`  ${brokenExt.length} broken external links`);
+      if ((lg.canonical_conflicts?.high_impact_count ?? 0) > 0) {
+        lines.push(`  ${lg.canonical_conflicts!.high_impact_count} canonical conflicts`);
+      }
+      lines.push(`  View link graph: ${data.dashboard_url || ''}/links`);
       lines.push('');
     }
 
