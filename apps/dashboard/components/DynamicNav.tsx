@@ -50,15 +50,25 @@ export default function DynamicNav() {
         <div className="px-3 text-sm text-slate-400">No sites connected</div>
       )}
 
-      {state === 'ready' && items.map((item) => (
-        <Link
-          key={item.href}
-          href={item.href}
-          className="block px-3 py-1.5 text-sm text-slate-300 hover:text-white hover:bg-white/10 rounded transition-colors"
-        >
-          {item.label}
-        </Link>
-      ))}
+      {state === 'ready' && sites?.map((site) => {
+        const mainItem = items.find((i) => i.href === `/client/${site.site_id}`);
+        return (
+          <div key={site.site_id}>
+            <Link
+              href={`/client/${site.site_id}`}
+              className="block px-3 py-1.5 text-sm text-slate-300 hover:text-white hover:bg-white/10 rounded transition-colors"
+            >
+              {mainItem?.label ?? site.domain}
+            </Link>
+            <Link
+              href={`/client/${site.site_id}/links`}
+              className="block px-6 py-1 text-xs text-slate-400 hover:text-white hover:bg-white/10 rounded transition-colors"
+            >
+              Link Graph
+            </Link>
+          </div>
+        );
+      })}
 
       <div className="border-t border-slate-700/50 mt-3 pt-3 space-y-1">
         <Link
