@@ -2,14 +2,24 @@
  * tools/scoring/health_score.ts
  *
  * Calculates a 0–100 health score from classified issues.
+ * Supports both legacy equal-weight and new severity-weighted algorithms.
  * Pure logic + injectable deps for persistence.
  */
 
 import type { IssueReport, Severity } from './issue_classifier.js';
+import { getIssueWeight, type IssueSeverity } from '../health/health_score_weights.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export type Grade = 'A' | 'B' | 'C' | 'D' | 'F';
+
+export interface ScoreBreakdownEntry {
+  issue_type:   string;
+  severity:     IssueSeverity;
+  score_impact: number;
+  count:        number;
+  total_impact: number;
+}
 
 export interface HealthScore {
   score:             number;   // 0–100
@@ -17,6 +27,12 @@ export interface HealthScore {
   total_issues:      number;
   issues_by_severity: Record<Severity, number>;
   breakdown:         string[];
+  score_breakdown?:        ScoreBreakdownEntry[];
+  most_impactful_issue?:   string | null;
+  critical_issue_count?:   number;
+  high_issue_count?:       number;
+  medium_issue_count?:     number;
+  low_issue_count?:        number;
 }
 
 export interface HealthScoreDeps {
@@ -108,4 +124,83 @@ export async function updateSiteHealthScore(
   deps: HealthScoreDeps,
 ): Promise<void> {
   await deps.updateSiteScore(siteId, score);
+}
+
+// ── Severity-weighted scoring ────────────────────────────────────────────────
+
+/**
+ * Calculate a severity-weighted health score.
+ * Starts at 100, subtracts score_impact per open issue.
+ * Only counts open issues (status !== 'applied').
+ * Floors at 0.
+ */
+export function calculateWeightedHealthScore(
+  issues: Array<{ issue_type: string; status: string }>,
+): number {
+  try {
+    if (!Array.isArray(issues)) return 100;
+    const open = issues.filter(i => i?.status !== 'applied');
+    let score = 100;
+    for (const issue of open) {
+      const profile = getIssueWeight(issue.issue_type);
+      score -= profile.score_impact;
+    }
+    return Math.max(0, Math.round(score));
+  } catch {
+    return 100;
+  }
+}
+
+/**
+ * Build a breakdown of score impact grouped by issue_type.
+ * Sorted by total_impact descending.
+ */
+export function buildScoreBreakdown(
+  issues: Array<{ issue_type: string; status: string }>,
+): ScoreBreakdownEntry[] {
+  try {
+    if (!Array.isArray(issues)) return [];
+    const open = issues.filter(i => i?.status !== 'applied');
+    const groups = new Map<string, { count: number; severity: IssueSeverity; score_impact: number }>();
+
+    for (const issue of open) {
+      const profile = getIssueWeight(issue.issue_type);
+      const key = (issue.issue_type ?? '').toUpperCase();
+      const existing = groups.get(key);
+      if (existing) {
+        existing.count++;
+      } else {
+        groups.set(key, { count: 1, severity: profile.severity, score_impact: profile.score_impact });
+      }
+    }
+
+    const entries: ScoreBreakdownEntry[] = [];
+    for (const [issue_type, data] of groups) {
+      entries.push({
+        issue_type,
+        severity:     data.severity,
+        score_impact: data.score_impact,
+        count:        data.count,
+        total_impact: data.score_impact * data.count,
+      });
+    }
+
+    return entries.sort((a, b) => b.total_impact - a.total_impact);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Returns the issue_type with the highest total_impact.
+ */
+export function getMostImpactfulIssue(
+  breakdown: ScoreBreakdownEntry[],
+): string | null {
+  try {
+    if (!Array.isArray(breakdown) || breakdown.length === 0) return null;
+    return breakdown[0].issue_type;
+  } catch {
+    return null;
+  }
 }

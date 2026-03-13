@@ -7,8 +7,12 @@ import assert from 'node:assert/strict';
 import {
   calculateHealthScore,
   updateSiteHealthScore,
+  calculateWeightedHealthScore,
+  buildScoreBreakdown,
+  getMostImpactfulIssue,
   type HealthScore,
   type HealthScoreDeps,
+  type ScoreBreakdownEntry,
 } from './health_score.js';
 import type { IssueReport, Severity } from './issue_classifier.js';
 
@@ -265,5 +269,155 @@ describe('updateSiteHealthScore', () => {
       () => updateSiteHealthScore('site-123', score, deps),
       { message: 'DB write failed' },
     );
+  });
+});
+
+// ── calculateWeightedHealthScore ─────────────────────────────────────────────
+
+describe('calculateWeightedHealthScore', () => {
+  it('starts at 100 with no issues', () => {
+    assert.equal(calculateWeightedHealthScore([]), 100);
+  });
+
+  it('subtracts critical impact correctly', () => {
+    // TITLE_MISSING = 15 pts
+    const score = calculateWeightedHealthScore([
+      { issue_type: 'TITLE_MISSING', status: 'open' },
+    ]);
+    assert.equal(score, 85);
+  });
+
+  it('subtracts multiple issues correctly', () => {
+    // TITLE_MISSING (15) + ALT_MISSING (2) = 17
+    const score = calculateWeightedHealthScore([
+      { issue_type: 'TITLE_MISSING', status: 'open' },
+      { issue_type: 'ALT_MISSING', status: 'open' },
+    ]);
+    assert.equal(score, 83);
+  });
+
+  it('floors at 0', () => {
+    const issues = Array.from({ length: 20 }, () => ({
+      issue_type: 'TITLE_MISSING', status: 'open',
+    }));
+    assert.equal(calculateWeightedHealthScore(issues), 0);
+  });
+
+  it('only counts open issues', () => {
+    const score = calculateWeightedHealthScore([
+      { issue_type: 'TITLE_MISSING', status: 'open' },
+      { issue_type: 'ROBOTS_NOINDEX', status: 'applied' },
+    ]);
+    assert.equal(score, 85);
+  });
+
+  it('ignores applied fixes', () => {
+    const score = calculateWeightedHealthScore([
+      { issue_type: 'TITLE_MISSING', status: 'applied' },
+    ]);
+    assert.equal(score, 100);
+  });
+
+  it('uses default weight for unknown issue type', () => {
+    // Default score_impact = 8
+    const score = calculateWeightedHealthScore([
+      { issue_type: 'SOMETHING_UNKNOWN', status: 'open' },
+    ]);
+    assert.equal(score, 92);
+  });
+
+  it('never throws on empty array', () => {
+    assert.doesNotThrow(() => calculateWeightedHealthScore([]));
+  });
+
+  it('never throws on null', () => {
+    assert.doesNotThrow(() => calculateWeightedHealthScore(null as any));
+  });
+});
+
+// ── buildScoreBreakdown ──────────────────────────────────────────────────────
+
+describe('buildScoreBreakdown', () => {
+  it('groups by issue_type', () => {
+    const bd = buildScoreBreakdown([
+      { issue_type: 'TITLE_MISSING', status: 'open' },
+      { issue_type: 'TITLE_MISSING', status: 'open' },
+      { issue_type: 'ALT_MISSING', status: 'open' },
+    ]);
+    assert.equal(bd.length, 2);
+    const title = bd.find(e => e.issue_type === 'TITLE_MISSING');
+    assert.equal(title?.count, 2);
+  });
+
+  it('sorts by total_impact descending', () => {
+    const bd = buildScoreBreakdown([
+      { issue_type: 'ALT_MISSING', status: 'open' },
+      { issue_type: 'TITLE_MISSING', status: 'open' },
+    ]);
+    assert.equal(bd[0].issue_type, 'TITLE_MISSING');
+  });
+
+  it('calculates count correctly', () => {
+    const bd = buildScoreBreakdown([
+      { issue_type: 'OG_MISSING', status: 'open' },
+      { issue_type: 'OG_MISSING', status: 'open' },
+      { issue_type: 'OG_MISSING', status: 'open' },
+    ]);
+    assert.equal(bd[0].count, 3);
+    assert.equal(bd[0].total_impact, 15);
+  });
+
+  it('excludes applied issues', () => {
+    const bd = buildScoreBreakdown([
+      { issue_type: 'TITLE_MISSING', status: 'applied' },
+    ]);
+    assert.equal(bd.length, 0);
+  });
+
+  it('never throws on null', () => {
+    assert.doesNotThrow(() => buildScoreBreakdown(null as any));
+  });
+});
+
+// ── getMostImpactfulIssue ────────────────────────────────────────────────────
+
+describe('getMostImpactfulIssue', () => {
+  it('returns highest impact issue', () => {
+    const bd = buildScoreBreakdown([
+      { issue_type: 'ALT_MISSING', status: 'open' },
+      { issue_type: 'TITLE_MISSING', status: 'open' },
+    ]);
+    assert.equal(getMostImpactfulIssue(bd), 'TITLE_MISSING');
+  });
+
+  it('returns null for empty', () => {
+    assert.equal(getMostImpactfulIssue([]), null);
+  });
+
+  it('never throws on null', () => {
+    assert.doesNotThrow(() => getMostImpactfulIssue(null as any));
+  });
+});
+
+// ── severity count checks ────────────────────────────────────────────────────
+
+describe('severity counts in breakdown', () => {
+  it('critical_issue_count correct', () => {
+    const bd = buildScoreBreakdown([
+      { issue_type: 'TITLE_MISSING', status: 'open' },
+      { issue_type: 'ROBOTS_NOINDEX', status: 'open' },
+      { issue_type: 'ALT_MISSING', status: 'open' },
+    ]);
+    const critCount = bd.filter(e => e.severity === 'critical').reduce((s, e) => s + e.count, 0);
+    assert.equal(critCount, 2);
+  });
+
+  it('high_issue_count correct', () => {
+    const bd = buildScoreBreakdown([
+      { issue_type: 'META_DESC_MISSING', status: 'open' },
+      { issue_type: 'SCHEMA_MISSING', status: 'open' },
+    ]);
+    const highCount = bd.filter(e => e.severity === 'high').reduce((s, e) => s + e.count, 0);
+    assert.equal(highCount, 2);
   });
 });
