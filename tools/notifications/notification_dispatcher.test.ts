@@ -12,6 +12,11 @@ import {
 } from './notification_dispatcher.js';
 import { buildFixNotification } from './fix_notification.js';
 import type { FixNotificationPayload } from './fix_notification.js';
+import {
+  DEDUP_WINDOW_MS,
+  type NotificationDedupRecord,
+  type NotificationDedupDeps,
+} from './notification_dedup.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -182,5 +187,127 @@ describe('dispatchBatchNotification', () => {
     const payloads = [payload('fix_applied'), null as any, payload('fix_failed')];
     const deps = { sendEmailFn: async () => {}, scheduleDigestFn: async () => {} };
     await assert.doesNotReject(() => dispatchBatchNotification(payloads, config(), deps));
+  });
+});
+
+// ── Dedup integration ────────────────────────────────────────────────────────
+
+function dedupStore(): NotificationDedupDeps & { records: Map<string, NotificationDedupRecord> } {
+  const records = new Map<string, NotificationDedupRecord>();
+  return {
+    records,
+    lookupFn: async (key) => records.get(key) ?? null,
+    saveFn: async (rec) => { records.set(rec.dedup_key, rec); },
+    deleteFn: async () => 0,
+    nowFn: () => Date.now(),
+  };
+}
+
+describe('dispatchFixNotification dedup', () => {
+  it('dispatches first notification with fix_id', async () => {
+    const store = dedupStore();
+    const result = await dispatchFixNotification(
+      payload('fix_failed'), config(),
+      { sendEmailFn: async () => {}, scheduleDigestFn: async () => {}, dedupDeps: store },
+      { fix_id: 'fix-1' },
+    );
+    assert.equal(result.dispatched, true);
+    assert.equal(result.method, 'immediate');
+  });
+
+  it('blocks duplicate within window', async () => {
+    const store = dedupStore();
+    const deps = { sendEmailFn: async () => {}, scheduleDigestFn: async () => {}, dedupDeps: store };
+    await dispatchFixNotification(payload('fix_failed'), config(), deps, { fix_id: 'fix-1' });
+    const r2 = await dispatchFixNotification(payload('fix_failed'), config(), deps, { fix_id: 'fix-1' });
+    assert.equal(r2.dispatched, false);
+    assert.equal(r2.skipped, true);
+    assert.equal(r2.skip_reason, 'duplicate within window');
+  });
+
+  it('dedup_key is set on skipped result', async () => {
+    const store = dedupStore();
+    const deps = { sendEmailFn: async () => {}, scheduleDigestFn: async () => {}, dedupDeps: store };
+    await dispatchFixNotification(payload('fix_failed'), config(), deps, { fix_id: 'fix-1' });
+    const r2 = await dispatchFixNotification(payload('fix_failed'), config(), deps, { fix_id: 'fix-1' });
+    assert.ok(r2.dedup_key);
+    assert.ok(r2.dedup_key!.includes('fix-1'));
+  });
+
+  it('3 retries send only once', async () => {
+    const store = dedupStore();
+    let sendCount = 0;
+    const deps = {
+      sendEmailFn: async () => { sendCount++; },
+      scheduleDigestFn: async () => {},
+      dedupDeps: store,
+    };
+    await dispatchFixNotification(payload('fix_failed'), config(), deps, { fix_id: 'fix-1' });
+    await dispatchFixNotification(payload('fix_failed'), config(), deps, { fix_id: 'fix-1' });
+    await dispatchFixNotification(payload('fix_failed'), config(), deps, { fix_id: 'fix-1' });
+    assert.equal(sendCount, 1);
+  });
+
+  it('allows different fix_ids independently', async () => {
+    const store = dedupStore();
+    const deps = { sendEmailFn: async () => {}, scheduleDigestFn: async () => {}, dedupDeps: store };
+    await dispatchFixNotification(payload('fix_failed'), config(), deps, { fix_id: 'fix-1' });
+    const r2 = await dispatchFixNotification(payload('fix_failed'), config(), deps, { fix_id: 'fix-2' });
+    assert.equal(r2.dispatched, true);
+  });
+
+  it('allows different events for same fix', async () => {
+    const store = dedupStore();
+    const deps = { sendEmailFn: async () => {}, scheduleDigestFn: async () => {}, dedupDeps: store };
+    await dispatchFixNotification(payload('fix_failed'), config(), deps, { fix_id: 'fix-1' });
+    const r2 = await dispatchFixNotification(payload('fix_applied'), config(), deps, { fix_id: 'fix-1' });
+    assert.equal(r2.dispatched, true);
+  });
+
+  it('no fix_id means no dedup check', async () => {
+    let sendCount = 0;
+    const deps = {
+      sendEmailFn: async () => { sendCount++; },
+      scheduleDigestFn: async () => {},
+    };
+    await dispatchFixNotification(payload('fix_failed'), config(), deps);
+    await dispatchFixNotification(payload('fix_failed'), config(), deps);
+    assert.equal(sendCount, 2);
+  });
+
+  it('fails open when dedup lookupFn throws', async () => {
+    const deps = {
+      sendEmailFn: async () => {},
+      scheduleDigestFn: async () => {},
+      dedupDeps: {
+        lookupFn: async () => { throw new Error('db error'); },
+        saveFn: async () => {},
+      },
+    };
+    const result = await dispatchFixNotification(payload('fix_failed'), config(), deps, { fix_id: 'fix-1' });
+    assert.equal(result.dispatched, true);
+  });
+
+  it('dedup works for digest path', async () => {
+    const store = dedupStore();
+    let digestCount = 0;
+    const deps = {
+      sendEmailFn: async () => {},
+      scheduleDigestFn: async () => { digestCount++; },
+      dedupDeps: store,
+    };
+    await dispatchFixNotification(payload('fix_applied'), config(), deps, { fix_id: 'fix-1' });
+    await dispatchFixNotification(payload('fix_applied'), config(), deps, { fix_id: 'fix-1' });
+    assert.equal(digestCount, 1);
+  });
+
+  it('records dedup entry after successful dispatch', async () => {
+    const store = dedupStore();
+    const deps = { sendEmailFn: async () => {}, scheduleDigestFn: async () => {}, dedupDeps: store };
+    await dispatchFixNotification(payload('fix_failed'), config(), deps, { fix_id: 'fix-1' });
+    assert.equal(store.records.size, 1);
+    const rec = store.records.get('dedup:site-1:fix-1:fix_failed');
+    assert.ok(rec);
+    assert.equal(rec!.fix_id, 'fix-1');
   });
 });

@@ -7,6 +7,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { runTagCleanupJob } from './gsc_tag_cleanup.js';
+import { cleanExpiredDedupRecords } from '../notifications/notification_dedup.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -158,6 +159,13 @@ export async function runOverdueSyncs(
       await runTagCleanupJob(24);
     } catch {
       // Tag cleanup failure must not block sync results
+    }
+
+    // Purge expired notification dedup records — non-fatal
+    try {
+      await cleanExpiredDedupRecords();
+    } catch {
+      // Dedup cleanup failure must not block sync results
     }
 
     return results;
