@@ -43,6 +43,8 @@ export interface OrchestratorResult {
   simulated_html:       string;
   recommendation:       string;
   safe_to_deploy:       boolean;
+  capture_timed_out:    boolean;
+  timed_out_viewports:  number[];
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -135,9 +137,11 @@ export function orchestrateHeavyweightRun(input: OrchestratorInput): Orchestrato
       run,
       simulation,
       regression,
-      simulated_html:  simulation.html,
-      recommendation:  regression.recommendation,
-      safe_to_deploy:  regression.passed,
+      simulated_html:      simulation.html,
+      recommendation:      regression.recommendation,
+      safe_to_deploy:      regression.passed,
+      capture_timed_out:   false,
+      timed_out_viewports: [],
     };
   } catch {
     const durationMs = Date.now() - startMs;
@@ -161,11 +165,13 @@ export function orchestrateHeavyweightRun(input: OrchestratorInput): Orchestrato
 
     return {
       run,
-      simulation:     emptySim,
-      regression:     emptyRegression,
-      simulated_html: input.html,
-      recommendation: 'BLOCK: Orchestrator failed.',
-      safe_to_deploy: false,
+      simulation:          emptySim,
+      regression:          emptyRegression,
+      simulated_html:      input.html,
+      recommendation:      'BLOCK: Orchestrator failed.',
+      safe_to_deploy:      false,
+      capture_timed_out:   false,
+      timed_out_viewports: [],
     };
   }
 }

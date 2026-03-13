@@ -25,6 +25,7 @@ function mockShot(
   viewportIndex: number,
   stage: 'before' | 'after',
   success = true,
+  timed_out = false,
 ): ViewportScreenshot {
   const vp = VIEWPORTS[viewportIndex];
   return {
@@ -34,11 +35,14 @@ function mockShot(
     key:         buildScreenshotKey('site_1', 'fix_1', vp.name, stage),
     captured_at: new Date().toISOString(),
     success,
-  };
+    timed_out,
+    elapsed_ms:  timed_out ? 15000 : 500,
+    timeout_ms:  15000,
+  } as any;
 }
 
-function allShots(stage: 'before' | 'after', success = true): ViewportScreenshot[] {
-  return VIEWPORTS.map((_, i) => mockShot(i, stage, success));
+function allShots(stage: 'before' | 'after', success = true, timed_out = false): ViewportScreenshot[] {
+  return VIEWPORTS.map((_, i) => mockShot(i, stage, success, timed_out));
 }
 
 const successCapture: CaptureFn = async (_bu, _au, _fid, _sid) => ({
@@ -62,7 +66,7 @@ const failStore: StoreFn = async (shot) => ({
 });
 
 function mockDeps(overrides?: Partial<QAGateDeps>): QAGateDeps {
-  return { capture: successCapture, store: successStore, ...overrides };
+  return { capture: successCapture, store: successStore, logFn: () => {}, ...overrides };
 }
 
 const input = { fix_id: 'fix_1', site_id: 'site_1', before_url: 'https://x.com/', after_url: 'https://x.com/' };
@@ -176,5 +180,76 @@ describe('runViewportQA — failures', () => {
     // capture succeeded → passed=true, even though store returned ok=false
     assert.equal(result.passed, true);
     assert.equal(result.stored_keys.length, 0); // nothing stored
+  });
+});
+
+// ── runViewportQA — timeout handling ─────────────────────────────────────────
+
+describe('runViewportQA — timeout handling', () => {
+  const allTimedOutCapture: CaptureFn = async () => ({
+    before: allShots('before', false, true),
+    after:  allShots('after', false, true),
+  });
+
+  const someTimedOutCapture: CaptureFn = async () => {
+    const before = allShots('before');
+    const after  = allShots('after');
+    // First viewport (mobile, 375px) times out
+    before[0] = mockShot(0, 'before', false, true);
+    after[0]  = mockShot(0, 'after', false, true);
+    return { before, after };
+  };
+
+  it('QA gate fails when all viewports time out', async () => {
+    const result = await runViewportQA(input, mockDeps({ capture: allTimedOutCapture }));
+    assert.equal(result.passed, false);
+  });
+
+  it('QA gate fails when some viewports time out', async () => {
+    const result = await runViewportQA(input, mockDeps({ capture: someTimedOutCapture }));
+    assert.equal(result.passed, false);
+  });
+
+  it('failure reason includes timeout duration', async () => {
+    const result = await runViewportQA(input, mockDeps({
+      capture: allTimedOutCapture,
+      captureOpts: { timeout_ms: 15000 },
+    }));
+    assert.ok(result.failure_reasons.some(r => r.includes('15000')));
+  });
+
+  it('failure reason includes timed out viewport widths', async () => {
+    const result = await runViewportQA(input, mockDeps({ capture: someTimedOutCapture }));
+    assert.ok(result.failure_reasons.some(r => r.includes('375')));
+  });
+
+  it('partial_capture=true when some timed out', async () => {
+    const result = await runViewportQA(input, mockDeps({ capture: someTimedOutCapture }));
+    assert.equal(result.partial_capture, true);
+  });
+
+  it('partial_capture=false when none timed out', async () => {
+    const result = await runViewportQA(input, mockDeps());
+    assert.equal(result.partial_capture, false);
+  });
+
+  it('timed_out_viewports list correct', async () => {
+    const result = await runViewportQA(input, mockDeps({ capture: someTimedOutCapture }));
+    assert.ok(result.timed_out_viewports.includes(375));
+  });
+
+  it('capture_timeout_ms included in result', async () => {
+    const result = await runViewportQA(input, mockDeps({ captureOpts: { timeout_ms: 12000 } }));
+    assert.equal(result.capture_timeout_ms, 12000);
+  });
+
+  it('QA gate passes normally when no timeouts', async () => {
+    const result = await runViewportQA(input, mockDeps());
+    assert.equal(result.passed, true);
+    assert.deepEqual(result.timed_out_viewports, []);
+  });
+
+  it('never throws', async () => {
+    await assert.doesNotReject(() => runViewportQA(input, mockDeps({ capture: allTimedOutCapture })));
   });
 });
