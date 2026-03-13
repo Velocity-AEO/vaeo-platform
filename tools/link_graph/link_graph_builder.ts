@@ -13,6 +13,8 @@ import { runDepthAnalysis, type DepthResult } from './link_depth_calculator.js';
 import { scoreAllPages, type AuthorityScore } from './authority_scorer.js';
 import { analyzeAllAnchors, type AnchorTextProfile } from './anchor_text_analyzer.js';
 import { detectAllEquityLeaks, type EquityLeak } from './equity_leak_detector.js';
+import { scanSiteForCanonicalConflicts } from './canonical_conflict_detector.js';
+import { scanAllPagesForLinkLimits } from './link_limit_enforcer.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -132,6 +134,34 @@ export async function buildLinkGraph(
     } catch (err) {
       analysis_errors.push(`equity: ${err instanceof Error ? err.message : String(err)}`);
     }
+
+    // 5. Canonical conflict scan (non-fatal)
+    let canonical_conflicts_count = 0;
+    try {
+      const canonicalResult = await scanSiteForCanonicalConflicts(site_id, {
+        loadLinksFn: async () => internalLinks ?? [],
+        loadPagesFn: async () => pages ?? [],
+      });
+      canonical_conflicts_count = canonicalResult.total_conflicts;
+    } catch (err) {
+      analysis_errors.push(`canonical: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    // 6. Link limit scan (non-fatal)
+    let link_limit_violations_count = 0;
+    try {
+      const limitResult = await scanAllPagesForLinkLimits(site_id, {
+        loadPagesFn: async () => (pages ?? []).map((p) => ({ url: p.url, title: p.title })),
+        loadLinksFn: async () => ({ internal: internalLinks ?? [], external: externalLinks ?? [] }),
+      });
+      link_limit_violations_count = limitResult.violations.length;
+    } catch (err) {
+      analysis_errors.push(`link_limits: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
+    process.stderr.write(
+      `[LINK_GRAPH] canonical_conflicts=${canonical_conflicts_count} link_limit_violations=${link_limit_violations_count}\n`,
+    );
 
     const result: LinkGraphResult = {
       site_id,
