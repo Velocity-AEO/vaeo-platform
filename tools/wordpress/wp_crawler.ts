@@ -28,13 +28,18 @@ export interface WPPage {
 }
 
 export interface WPCrawlResult {
-  site_id:               string;
-  domain:                string;
-  crawled_at:            string;
-  total_pages:           number;
-  pages:                 WPPage[];
-  woocommerce_products:  number;
-  errors:                string[];
+  site_id:                       string;
+  domain:                        string;
+  crawled_at:                    string;
+  total_pages:                   number;
+  pages:                         WPPage[];
+  woocommerce_products:          number;
+  errors:                        string[];
+  noindex_pages_skipped:         number;
+  redirect_chains_resolved:      number;
+  circular_redirects_skipped:    number;
+  max_hops_exceeded_skipped:     number;
+  protected_pages_skipped:       number;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -135,16 +140,46 @@ async function fetchEndpoint(
 
 // ── crawlWPSite ───────────────────────────────────────────────────────────────
 
+export interface WPCrawlerDeps {
+  fetchFn?:   FetchFn;
+  logFn?:     (msg: string) => void;
+  /** Noindex check — injectable for testing */
+  checkNoindexFn?: (url: string, html: string, headers: Record<string, string>) => { is_noindex: boolean; signal: string };
+  /** Redirect resolve — injectable for testing */
+  resolveRedirectFn?: (url: string) => Promise<{ final_url: string; is_redirect: boolean; circular_detected: boolean; max_hops_exceeded: boolean }>;
+}
+
 export async function crawlWPSite(
   config: WPConnectionConfig,
-  deps?: { fetchFn?: FetchFn },
+  deps?: WPCrawlerDeps,
 ): Promise<WPCrawlResult> {
+  const emptyResult = (): WPCrawlResult => ({
+    site_id:              config?.site_id ?? '',
+    domain:               config?.domain  ?? '',
+    crawled_at:           new Date().toISOString(),
+    total_pages:          0,
+    pages:                [],
+    woocommerce_products: 0,
+    errors:               [],
+    noindex_pages_skipped:      0,
+    redirect_chains_resolved:   0,
+    circular_redirects_skipped: 0,
+    max_hops_exceeded_skipped:  0,
+    protected_pages_skipped:    0,
+  });
+
   try {
     const base       = (config?.wp_url ?? '').replace(/\/$/, '');
     const authHeader = buildAuthHeader(config?.username ?? '', config?.app_password ?? '');
     const fetchFn    = deps?.fetchFn ?? globalThis.fetch;
+    const log        = deps?.logFn ?? ((msg: string) => process.stderr.write(msg + '\n'));
     const errors: string[] = [];
     const pages: WPPage[]  = [];
+    let noindex_pages_skipped       = 0;
+    let redirect_chains_resolved    = 0;
+    let circular_redirects_skipped  = 0;
+    let max_hops_exceeded_skipped   = 0;
+    let protected_pages_skipped     = 0;
 
     // Fetch pages
     const { items: rawPages, error: pagesErr } = await fetchEndpoint(
@@ -177,6 +212,61 @@ export async function crawlWPSite(
     }
     // WC products endpoint 404/403 is expected on non-WC sites — skip silently
 
+    // Noindex filtering
+    if (deps?.checkNoindexFn) {
+      const filtered: WPPage[] = [];
+      for (const page of pages) {
+        try {
+          const result = deps.checkNoindexFn(page.url, '', {});
+          if (result.is_noindex) {
+            noindex_pages_skipped++;
+            log(`[WP_CRAWLER] Skipping noindex page: ${page.url} signal=${result.signal}`);
+            continue;
+          }
+        } catch {
+          // fail open
+        }
+        filtered.push(page);
+      }
+      pages.length = 0;
+      pages.push(...filtered);
+    }
+
+    // Redirect resolution
+    if (deps?.resolveRedirectFn) {
+      const resolved: WPPage[] = [];
+      const seenFinals = new Set<string>();
+      for (const page of pages) {
+        try {
+          const result = await deps.resolveRedirectFn(page.url);
+          if (result.circular_detected) {
+            circular_redirects_skipped++;
+            log(`[WP_CRAWLER] Skipping redirect issue: ${page.url} reason=circular`);
+            continue;
+          }
+          if (result.max_hops_exceeded) {
+            max_hops_exceeded_skipped++;
+            log(`[WP_CRAWLER] Skipping redirect issue: ${page.url} reason=max_hops_exceeded`);
+            continue;
+          }
+          if (result.is_redirect) {
+            redirect_chains_resolved++;
+            page.url = result.final_url;
+          }
+          if (seenFinals.has(page.url)) {
+            log(`[WP_CRAWLER] Deduped redirect: ${page.url}`);
+            continue;
+          }
+          seenFinals.add(page.url);
+        } catch {
+          // fail open
+        }
+        resolved.push(page);
+      }
+      pages.length = 0;
+      pages.push(...resolved);
+    }
+
     return {
       site_id:              config?.site_id ?? '',
       domain:               config?.domain  ?? '',
@@ -185,17 +275,54 @@ export async function crawlWPSite(
       pages,
       woocommerce_products,
       errors,
+      noindex_pages_skipped,
+      redirect_chains_resolved,
+      circular_redirects_skipped,
+      max_hops_exceeded_skipped,
+      protected_pages_skipped,
     };
   } catch (err) {
-    return {
-      site_id:              config?.site_id ?? '',
-      domain:               config?.domain  ?? '',
-      crawled_at:           new Date().toISOString(),
-      total_pages:          0,
-      pages:                [],
-      woocommerce_products: 0,
-      errors:               [err instanceof Error ? err.message : String(err)],
-    };
+    const r = emptyResult();
+    r.errors = [err instanceof Error ? err.message : String(err)];
+    return r;
+  }
+}
+
+// ── fetchPageWithStatusCheck ────────────────────────────────────────────────
+
+export async function fetchPageWithStatusCheck(
+  url: string,
+  fetchFn: FetchFn,
+  authHeader: string,
+  deps?: { logFn?: (msg: string) => void },
+): Promise<{ ok: boolean; html: string; status: number; skipped: boolean; skip_reason?: string }> {
+  const log = deps?.logFn ?? ((msg: string) => process.stderr.write(msg + '\n'));
+
+  try {
+    const res = await fetchFn(url, {
+      method: 'GET',
+      headers: { Authorization: authHeader },
+    });
+
+    if (res.status === 401 || res.status === 403) {
+      log(`[WP_CRAWLER] Skipping protected page: ${url} status=${res.status}`);
+      return { ok: false, html: '', status: res.status, skipped: true, skip_reason: 'protected' };
+    }
+
+    if (res.status === 404) {
+      log(`[WP_CRAWLER] Skipping 404: ${url}`);
+      return { ok: false, html: '', status: 404, skipped: true, skip_reason: '404' };
+    }
+
+    if (res.status >= 500) {
+      log(`[WP_CRAWLER] Skipping server error: ${url} status=${res.status}`);
+      return { ok: false, html: '', status: res.status, skipped: true, skip_reason: 'server_error' };
+    }
+
+    const html = await res.text();
+    return { ok: true, html, status: res.status, skipped: false };
+  } catch {
+    return { ok: false, html: '', status: 0, skipped: true, skip_reason: 'fetch_error' };
   }
 }
 

@@ -4,7 +4,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { crawlWPSite, summarizeCrawl } from './wp_crawler.ts';
+import { crawlWPSite, summarizeCrawl, fetchPageWithStatusCheck } from './wp_crawler.ts';
 import type { WPCrawlResult, WPPage } from './wp_crawler.ts';
 import type { WPConnectionConfig } from './wp_connection.ts';
 
@@ -345,5 +345,190 @@ describe('summarizeCrawl', () => {
   it('includes crawl date', () => {
     const s = summarizeCrawl(makeMockResult());
     assert.ok(s.includes('2026-03-12'));
+  });
+});
+
+// ── crawlWPSite — noindex filtering ─────────────────────────────────────────
+
+describe('crawlWPSite — noindex filtering', () => {
+  it('crawler skips noindex pages', async () => {
+    const fetchFn = makeSeqFetch([
+      { status: 200, body: [makeRawPage({ id: 1 }), makeRawPage({ id: 2, link: 'https://mystore.com/noindex' })] },
+      { status: 200, body: [] },
+      { status: 404, body: {}, ok: false },
+    ]);
+    const r = await crawlWPSite(BASE_CONFIG, {
+      fetchFn,
+      logFn: () => {},
+      checkNoindexFn: (url) => ({
+        is_noindex: url.includes('noindex'),
+        signal: 'meta_robots',
+      }),
+    });
+    assert.equal(r.pages.length, 1);
+    assert.equal(r.noindex_pages_skipped, 1);
+  });
+
+  it('crawler logs skipped noindex pages', async () => {
+    const logged: string[] = [];
+    const fetchFn = makeSeqFetch([
+      { status: 200, body: [makeRawPage({ id: 1, link: 'https://mystore.com/hidden' })] },
+      { status: 200, body: [] },
+      { status: 404, body: {}, ok: false },
+    ]);
+    await crawlWPSite(BASE_CONFIG, {
+      fetchFn,
+      logFn: (msg) => logged.push(msg),
+      checkNoindexFn: () => ({ is_noindex: true, signal: 'meta_robots' }),
+    });
+    assert.ok(logged.some(m => m.includes('noindex')));
+  });
+
+  it('noindex_pages_skipped count correct', async () => {
+    const fetchFn = makeSeqFetch([
+      { status: 200, body: [makeRawPage({ id: 1 }), makeRawPage({ id: 2 }), makeRawPage({ id: 3 })] },
+      { status: 200, body: [] },
+      { status: 404, body: {}, ok: false },
+    ]);
+    const r = await crawlWPSite(BASE_CONFIG, {
+      fetchFn,
+      logFn: () => {},
+      checkNoindexFn: () => ({ is_noindex: true, signal: 'both' }),
+    });
+    assert.equal(r.noindex_pages_skipped, 3);
+    assert.equal(r.pages.length, 0);
+  });
+});
+
+// ── crawlWPSite — redirect resolution ───────────────────────────────────────
+
+describe('crawlWPSite — redirect resolution', () => {
+  it('crawler uses final_url for redirected pages', async () => {
+    const fetchFn = makeSeqFetch([
+      { status: 200, body: [makeRawPage({ id: 1, link: 'https://mystore.com/old' })] },
+      { status: 200, body: [] },
+      { status: 404, body: {}, ok: false },
+    ]);
+    const r = await crawlWPSite(BASE_CONFIG, {
+      fetchFn,
+      logFn: () => {},
+      resolveRedirectFn: async () => ({
+        final_url: 'https://mystore.com/new',
+        is_redirect: true,
+        circular_detected: false,
+        max_hops_exceeded: false,
+      }),
+    });
+    assert.equal(r.pages[0]?.url, 'https://mystore.com/new');
+  });
+
+  it('crawler skips circular redirect URLs', async () => {
+    const fetchFn = makeSeqFetch([
+      { status: 200, body: [makeRawPage({ id: 1 })] },
+      { status: 200, body: [] },
+      { status: 404, body: {}, ok: false },
+    ]);
+    const r = await crawlWPSite(BASE_CONFIG, {
+      fetchFn,
+      logFn: () => {},
+      resolveRedirectFn: async () => ({
+        final_url: 'https://mystore.com/about',
+        is_redirect: true,
+        circular_detected: true,
+        max_hops_exceeded: false,
+      }),
+    });
+    assert.equal(r.pages.length, 0);
+    assert.equal(r.circular_redirects_skipped, 1);
+  });
+
+  it('crawler skips max hops exceeded URLs', async () => {
+    const fetchFn = makeSeqFetch([
+      { status: 200, body: [makeRawPage({ id: 1 })] },
+      { status: 200, body: [] },
+      { status: 404, body: {}, ok: false },
+    ]);
+    const r = await crawlWPSite(BASE_CONFIG, {
+      fetchFn,
+      logFn: () => {},
+      resolveRedirectFn: async () => ({
+        final_url: 'https://mystore.com/loop',
+        is_redirect: true,
+        circular_detected: false,
+        max_hops_exceeded: true,
+      }),
+    });
+    assert.equal(r.pages.length, 0);
+    assert.equal(r.max_hops_exceeded_skipped, 1);
+  });
+
+  it('crawler deduplicates by final_url', async () => {
+    const fetchFn = makeSeqFetch([
+      { status: 200, body: [makeRawPage({ id: 1, link: 'https://mystore.com/a' }), makeRawPage({ id: 2, link: 'https://mystore.com/b' })] },
+      { status: 200, body: [] },
+      { status: 404, body: {}, ok: false },
+    ]);
+    const r = await crawlWPSite(BASE_CONFIG, {
+      fetchFn,
+      logFn: () => {},
+      resolveRedirectFn: async () => ({
+        final_url: 'https://mystore.com/same',
+        is_redirect: true,
+        circular_detected: false,
+        max_hops_exceeded: false,
+      }),
+    });
+    assert.equal(r.pages.length, 1);
+  });
+
+  it('redirect_chains_resolved count correct', async () => {
+    const fetchFn = makeSeqFetch([
+      { status: 200, body: [makeRawPage({ id: 1 }), makeRawPage({ id: 2, link: 'https://mystore.com/other' })] },
+      { status: 200, body: [] },
+      { status: 404, body: {}, ok: false },
+    ]);
+    const r = await crawlWPSite(BASE_CONFIG, {
+      fetchFn,
+      logFn: () => {},
+      resolveRedirectFn: async () => ({
+        final_url: 'https://mystore.com/resolved',
+        is_redirect: true,
+        circular_detected: false,
+        max_hops_exceeded: false,
+      }),
+    });
+    assert.equal(r.redirect_chains_resolved, 2);
+  });
+});
+
+// ── fetchPageWithStatusCheck — protected/error pages ────────────────────────
+
+describe('fetchPageWithStatusCheck', () => {
+  it('skips 401 pages gracefully', async () => {
+    const fetch = async () => ({ ok: false, status: 401, text: async () => '' } as unknown as Response);
+    const r = await fetchPageWithStatusCheck('https://x.com/', fetch as any, 'auth', { logFn: () => {} });
+    assert.equal(r.skipped, true);
+    assert.equal(r.skip_reason, 'protected');
+  });
+
+  it('skips 403 pages gracefully', async () => {
+    const fetch = async () => ({ ok: false, status: 403, text: async () => '' } as unknown as Response);
+    const r = await fetchPageWithStatusCheck('https://x.com/', fetch as any, 'auth', { logFn: () => {} });
+    assert.equal(r.skipped, true);
+    assert.equal(r.skip_reason, 'protected');
+  });
+
+  it('skips 404 pages gracefully', async () => {
+    const fetch = async () => ({ ok: false, status: 404, text: async () => '' } as unknown as Response);
+    const r = await fetchPageWithStatusCheck('https://x.com/', fetch as any, 'auth', { logFn: () => {} });
+    assert.equal(r.skipped, true);
+    assert.equal(r.skip_reason, '404');
+  });
+
+  it('skips 5xx pages gracefully', async () => {
+    const fetch = async () => ({ ok: false, status: 502, text: async () => '' } as unknown as Response);
+    const r = await fetchPageWithStatusCheck('https://x.com/', fetch as any, 'auth', { logFn: () => {} });
+    assert.equal(r.skipped, true);
+    assert.equal(r.skip_reason, 'server_error');
   });
 });
