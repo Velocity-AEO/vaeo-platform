@@ -29,6 +29,20 @@ interface SEOCoverage {
   managed_fields:  string[];
 }
 
+interface WPSubsite {
+  site_id: number;
+  url:     string;
+  name:    string;
+  is_main: boolean;
+}
+
+interface WPMultisiteConfig {
+  is_multisite:   boolean;
+  multisite_type: string;
+  subsites:       WPSubsite[];
+  subsite_count:  number;
+}
+
 interface WPOnboardingState {
   step:                WPOnboardingStep;
   site_id?:            string;
@@ -38,6 +52,8 @@ interface WPOnboardingState {
   connection_verified: boolean;
   plugins_detected:    string[];
   seo_coverage?:       SEOCoverage;
+  is_multisite?:       boolean;
+  multisite_config?:   WPMultisiteConfig;
   error?:              string;
   completed_at?:       string;
 }
@@ -358,6 +374,33 @@ export default function WordPressOnboardPage() {
               </p>
             </div>
           )}
+          {/* Multisite banner */}
+          {state.is_multisite && state.multisite_config && (
+            <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: 16, marginBottom: 16 }}>
+              <h3 style={{ fontSize: 16, fontWeight: 600, color: '#1d4ed8', marginBottom: 8 }}>WordPress Multisite Detected</h3>
+              <p style={{ fontSize: 14, color: '#1e40af', marginBottom: 12 }}>
+                We found {state.multisite_config.subsite_count} subsites on this install.
+                VAEO will crawl and optimize all subsites using your credentials.
+              </p>
+              <div style={{ background: '#fff', borderRadius: 8, border: '1px solid #dbeafe', marginBottom: 12 }}>
+                {state.multisite_config.subsites.map((s: WPSubsite) => (
+                  <div key={s.site_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', borderBottom: '1px solid #f0f4ff' }}>
+                    <div>
+                      <span style={{ fontSize: 14, fontWeight: 500, color: '#1e293b' }}>{s.name}</span>
+                      <span style={{ fontSize: 12, color: '#94a3b8', marginLeft: 8, fontFamily: 'monospace' }}>{s.url}</span>
+                    </div>
+                    {s.is_main && (
+                      <span style={{ fontSize: 11, background: '#e2e8f0', color: '#64748b', padding: '2px 8px', borderRadius: 12 }}>Main</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <p style={{ fontSize: 12, color: '#94a3b8', margin: 0 }}>
+                You can manage individual subsites after onboarding
+              </p>
+            </div>
+          )}
+
           <button
             onClick={() => advance({})}
             disabled={loading}

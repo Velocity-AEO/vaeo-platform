@@ -8,6 +8,7 @@
  */
 
 import type { SEOCoverage } from './plugin_conflict_detector.js';
+import type { WPMultisiteConfig } from './wp_multisite_detector.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -29,6 +30,8 @@ export interface WPOnboardingState {
   connection_verified:   boolean;
   plugins_detected:      string[];
   seo_coverage?:         SEOCoverage;
+  is_multisite?:         boolean;
+  multisite_config?:     WPMultisiteConfig;
   error?:                string;
   completed_at?:         string;
 }
