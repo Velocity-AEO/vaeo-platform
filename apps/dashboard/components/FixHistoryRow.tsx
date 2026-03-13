@@ -3,14 +3,34 @@
 import { useState } from 'react';
 import type { FixExplanation } from '../../../tools/explanations/fix_explanation_registry.js';
 import { getCategoryBadgeConfig } from '../lib/fix_explanation_display.js';
+import FixConfidenceDisplay from './FixConfidenceDisplay';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
+interface ConfidenceDisplayData {
+  fix_id:               string;
+  confidence_score:     number;
+  confidence_label:     string;
+  confidence_color:     string;
+  risk_level:           string;
+  risk_label:           string;
+  risk_color:           string;
+  decision_method:      'auto_approved' | 'manually_approved' | 'auto_applied';
+  decision_label:       string;
+  decision_reasons:     string[];
+  threshold_used:       number;
+  threshold_met:        boolean;
+  sandbox_passed:       boolean | null;
+  viewport_qa_passed:   boolean | null;
+  applied_at:           string;
+}
+
 interface FixHistoryRowProps {
-  fix_label:   string;
-  url:         string;
-  applied_at:  string;
-  explanation?: FixExplanation | null;
+  fix_label:            string;
+  url:                  string;
+  applied_at:           string;
+  explanation?:         FixExplanation | null;
+  confidence_display?:  ConfidenceDisplayData | null;
 }
 
 // ── Component ────────────────────────────────────────────────────────────────
@@ -20,6 +40,7 @@ export default function FixHistoryRow({
   url,
   applied_at,
   explanation,
+  confidence_display,
 }: FixHistoryRowProps) {
   const [expanded, setExpanded] = useState(false);
 
@@ -31,15 +52,20 @@ export default function FixHistoryRow({
     <div className="border border-slate-200 rounded-lg overflow-hidden">
       {/* Collapsed header */}
       <div className="flex items-center justify-between px-4 py-3 bg-white">
-        <div className="flex items-center gap-3 min-w-0">
-          {badge && (
-            <span className={`shrink-0 px-2 py-0.5 rounded text-[10px] font-medium ${badge.color}`}>
-              {badge.label}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-3">
+            {badge && (
+              <span className={`shrink-0 px-2 py-0.5 rounded text-[10px] font-medium ${badge.color}`}>
+                {badge.label}
+              </span>
+            )}
+            <span className="text-sm font-medium text-slate-800 truncate">
+              {explanation?.short_label ?? fix_label}
             </span>
+          </div>
+          {confidence_display && (
+            <FixConfidenceDisplay data={confidence_display} />
           )}
-          <span className="text-sm font-medium text-slate-800 truncate">
-            {explanation?.short_label ?? fix_label}
-          </span>
         </div>
         <div className="flex items-center gap-3 shrink-0">
           <span className="text-xs text-slate-400 font-mono">{url}</span>

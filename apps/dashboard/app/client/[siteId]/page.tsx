@@ -12,6 +12,9 @@ import POVDisclaimer from '@/components/POVDisclaimer';
 import SimulatedDataBanner from '@/components/SimulatedDataBanner';
 import RankingsTrendPanel from '@/components/RankingsTrendPanel';
 import OrphanedPagesPanel from '@/components/OrphanedPagesPanel';
+import ConfidenceSummaryCard from '@/components/ConfidenceSummaryCard';
+import OnboardingProgressTracker from '@/components/OnboardingProgressTracker';
+import { calculateProgress, SHOPIFY_ONBOARDING_STEPS } from '@/../tools/onboarding/onboarding_progress';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -88,6 +91,9 @@ export default function ClientDashboard() {
   const [loading,      setLoading]      = useState(true);
   const [error,        setError]        = useState<string | null>(null);
   const [qaSummary,    setQaSummary]    = useState<{ total_fixes_with_qa: number; passed: number; failed: number; pass_rate: number; most_failed_viewport: string | null } | null>(null);
+  const [onboardingDismissed, setOnboardingDismissed] = useState(() => {
+    try { return typeof window !== 'undefined' && localStorage.getItem(`vaeo_onboarding_dismissed_${siteId}`) === '1'; } catch { return false; }
+  });
 
   // Auth guard — check client access on mount
   useEffect(() => {
@@ -221,6 +227,17 @@ export default function ClientDashboard() {
 
       <POVDisclaimer />
       <SimulatedDataBanner data_source="simulated" gsc_connected={false} />
+
+      {/* Onboarding progress */}
+      {!onboardingDismissed && (
+        <OnboardingProgressTracker
+          progress={calculateProgress(SHOPIFY_ONBOARDING_STEPS.map(s => ({ ...s })), siteId, 'shopify')}
+          onDismiss={() => {
+            setOnboardingDismissed(true);
+            try { localStorage.setItem(`vaeo_onboarding_dismissed_${siteId}`, '1'); } catch {}
+          }}
+        />
+      )}
 
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -396,6 +413,9 @@ export default function ClientDashboard() {
           )}
         </div>
       </section>
+
+      {/* Fix decision confidence summary */}
+      <ConfidenceSummaryCard site_id={siteId} />
 
       {/* Orphaned Pages */}
       <OrphanedPagesPanel site_id={siteId} />
