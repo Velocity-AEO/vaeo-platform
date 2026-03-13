@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { runTagCleanupJob } from './gsc_tag_cleanup.js';
 import { cleanExpiredDedupRecords } from '../notifications/notification_dedup.js';
 import { analyzeSiteTrends } from '../sandbox/lighthouse_trend_detector.js';
+import { runWeeklyBaselineCapture, type BaselineCaptureResult } from '../sandbox/baseline_scheduler.js';
 import {
   runDeltaSync,
   type DeltaSyncConfig,
@@ -249,8 +250,10 @@ export async function triggerFullSync(
 
 export async function runOverdueSyncs(
   deps?: {
-    loadJobsFn?: () => Promise<GSCSyncJob[]>;
-    runSyncFn?:  (site_id: string) => Promise<SyncResult>;
+    loadJobsFn?:         () => Promise<GSCSyncJob[]>;
+    runSyncFn?:          (site_id: string) => Promise<SyncResult>;
+    baselineCaptureFn?:  (site_id: string) => Promise<BaselineCaptureResult>;
+    logFn?:              (msg: string) => void;
   },
 ): Promise<BatchSyncResult[]> {
   try {
@@ -304,6 +307,36 @@ export async function runOverdueSyncs(
       }
     } catch {
       // Trend analysis failure must not block sync results
+    }
+
+    // Weekly baseline capture (Sunday runs) — non-fatal
+    try {
+      const log = deps?.logFn ?? ((msg: string) => process.stderr.write(msg + '\n'));
+      const day = new Date().getDay();
+      if (day === 0) {
+        const captureFn = deps?.baselineCaptureFn
+          ?? ((sid: string) => runWeeklyBaselineCapture(sid));
+        for (const job of overdue) {
+          try {
+            const result = await captureFn(job.site_id);
+            log(
+              `[BASELINE] site=${job.site_id} captured=${result.pages_captured} ` +
+              `degraded=${result.pages_degraded}`,
+            );
+            // Dispatch alerts for critical/high regressions
+            if (result.critical_regressions.length > 0) {
+              log(
+                `[BASELINE_ALERT] site=${job.site_id} critical_pages=${result.critical_regressions.length} ` +
+                `urls=${result.critical_regressions.slice(0, 3).join(',')}`,
+              );
+            }
+          } catch {
+            // Per-site baseline failure must not block other sites
+          }
+        }
+      }
+    } catch {
+      // Baseline capture failure must not block sync results
     }
 
     return results;
