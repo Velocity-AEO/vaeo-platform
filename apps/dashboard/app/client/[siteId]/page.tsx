@@ -15,6 +15,8 @@ import OrphanedPagesPanel from '@/components/OrphanedPagesPanel';
 import ConfidenceSummaryCard from '@/components/ConfidenceSummaryCard';
 import DriftScanPanel from '@/components/DriftScanPanel';
 import AEOScoreCard from '@/components/AEOScoreCard';
+import SandboxHealthPanel from '@/components/SandboxHealthPanel';
+import LighthouseTrendPanel from '@/components/LighthouseTrendPanel';
 import OnboardingProgressTracker from '@/components/OnboardingProgressTracker';
 import { calculateProgress, SHOPIFY_ONBOARDING_STEPS } from '@/../tools/onboarding/onboarding_progress';
 
@@ -549,6 +551,12 @@ export default function ClientDashboard() {
 
       {/* Drift scan monitor */}
       <DriftScanPanel site_id={siteId} />
+
+      {/* Sandbox health */}
+      <SandboxHealthPanel site_id={siteId} />
+
+      {/* Lighthouse performance trends */}
+      <LighthouseTrendPanel site_id={siteId} />
 
     </div>
   );
