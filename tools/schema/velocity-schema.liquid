@@ -1,0 +1,13 @@
+{%- assign _vschema = nil -%}
+{%- case request.page_type -%}
+  {%- when 'product'    -%}{%- assign _vschema = product.metafields.velocity_seo.schema_json.value    -%}
+  {%- when 'collection' -%}{%- assign _vschema = collection.metafields.velocity_seo.schema_json.value -%}
+  {%- when 'page'       -%}{%- assign _vschema = page.metafields.velocity_seo.schema_json.value       -%}
+  {%- when 'article'    -%}{%- assign _vschema = article.metafields.velocity_seo.schema_json.value    -%}
+  {%- when 'blog'       -%}{%- assign _vschema = blog.metafields.velocity_seo.schema_json.value       -%}
+{%- endcase -%}
+{%- if _vschema -%}
+<!-- VAEO schema-{{ request.page_type }} -->
+<script type="application/ld+json">{{ _vschema | json }}</script>
+<!-- /VAEO schema-{{ request.page_type }} -->
+{%- endif -%}
