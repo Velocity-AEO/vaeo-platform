@@ -18,6 +18,13 @@ const nextConfig = {
       '.js': ['.ts', '.tsx', '.js', '.jsx'],
       '.jsx': ['.tsx', '.jsx'],
     };
+    // When webpack processes files outside apps/dashboard (e.g. tools/, packages/),
+    // it walks up from those files looking for node_modules — and never reaches
+    // apps/dashboard/node_modules. Prepend it explicitly so all deps resolve.
+    config.resolve.modules = [
+      path.join(__dirname, 'node_modules'),
+      'node_modules',
+    ];
     return config;
   },
 };
