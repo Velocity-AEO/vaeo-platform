@@ -1,5 +1,0 @@
-{
-  "buildCommand": "npm install && cd apps/dashboard && npm install && npm run build",
-  "installCommand": "echo 'skip'",
-  "framework": "nextjs"
-}
