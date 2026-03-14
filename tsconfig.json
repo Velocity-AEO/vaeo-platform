@@ -8,9 +8,11 @@
     "strict": true,
     "resolveJsonModule": true,
     "paths": {
+      "@supabase/supabase-js": ["./apps/dashboard/node_modules/@supabase/supabase-js"],
+      "@anthropic-ai/sdk": ["./apps/dashboard/node_modules/@anthropic-ai/sdk"],
       "@tools/*": ["./tools/*"]
     }
   },
-  "include": ["tools/**/*.ts", "src/**/*.ts", "apps/dashboard/lib/**/*.ts"],
-  "exclude": ["node_modules", "apps/dashboard/node_modules"]
+  "include": ["tools/**/*.ts", "src/**/*.ts"],
+  "exclude": ["node_modules", "apps/dashboard"]
 }
