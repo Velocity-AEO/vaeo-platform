@@ -15,7 +15,8 @@
  *   - fetchSitemapUrls is exported for direct unit testing
  */
 
-import type { SupabaseClient } from '@supabase/supabase-js';
+// Inline structural type — avoids a hard dependency on @supabase/supabase-js
+type SupabaseClient = { from: (table: string) => any }; // eslint-disable-line @typescript-eslint/no-explicit-any
 
 // Re-export SupabaseClient type so tests can import it from this module.
 export type { SupabaseClient };

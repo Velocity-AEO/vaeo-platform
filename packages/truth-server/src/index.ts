@@ -12,7 +12,8 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import type { SupabaseClient } from '@supabase/supabase-js';
+// Inline structural type — avoids a hard dependency on @supabase/supabase-js
+type SupabaseClient = { from: (table: string) => any }; // eslint-disable-line @typescript-eslint/no-explicit-any
 import type { CrawlResult } from '../../crawler/src/index.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────────

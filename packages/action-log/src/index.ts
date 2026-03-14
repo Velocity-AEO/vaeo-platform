@@ -14,7 +14,9 @@
  *   - This module must never throw or crash the calling system.
  */
 
-import type { SupabaseClient } from '@supabase/supabase-js';
+// Inline structural type — avoids a hard dependency on @supabase/supabase-js
+// (the real client is loaded via dynamic import at runtime only).
+type SupabaseClient = { from: (table: string) => any }; // eslint-disable-line @typescript-eslint/no-explicit-any
 import type { CmsType } from '../../core/types.js';
 
 // ── ActionLogEntry ────────────────────────────────────────────────────────────

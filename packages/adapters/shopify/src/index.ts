@@ -527,11 +527,17 @@ async function persistRollbackManifest(
   if (!url || !key) return;
 
   try {
-    const { createClient } = await import('@supabase/supabase-js');
-    const db = createClient(url, key);
-    await db.from('action_queue')
-      .update({ rollback_manifest: beforeValue })
-      .eq('id', actionId);
+    // Use raw Supabase REST API to avoid @supabase/supabase-js import dependency
+    await fetch(`${url}/rest/v1/action_queue?id=eq.${actionId}`, {
+      method:  'PATCH',
+      headers: {
+        'apikey':        key,
+        'Authorization': `Bearer ${key}`,
+        'Content-Type':  'application/json',
+        'Prefer':        'return=minimal',
+      },
+      body: JSON.stringify({ rollback_manifest: beforeValue }),
+    });
   } catch { /* non-fatal */ }
 }
 

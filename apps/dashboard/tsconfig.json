@@ -22,7 +22,9 @@
     "paths": {
       "@/*": ["./*"],
       "@tools/*": ["../../tools/*"],
-      "@vaeo/scoring": ["../../packages/scoring/src/index.ts"]
+      "@vaeo/scoring": ["../../packages/scoring/src/index.ts"],
+      "@supabase/supabase-js": ["./node_modules/@supabase/supabase-js"],
+      "@anthropic-ai/sdk": ["./node_modules/@anthropic-ai/sdk"]
     }
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],

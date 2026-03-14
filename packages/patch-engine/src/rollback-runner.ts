@@ -17,7 +17,8 @@
  *   - Target: under 5 minutes for 50 fields (adapter is the bottleneck, not us)
  */
 
-import type { SupabaseClient } from '@supabase/supabase-js';
+// Inline structural type — avoids a hard dependency on @supabase/supabase-js
+type SupabaseClient = { from: (table: string) => any }; // eslint-disable-line @typescript-eslint/no-explicit-any
 import type {
   CMSAdapter,
   PatchManifest,

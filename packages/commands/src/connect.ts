@@ -18,7 +18,6 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { createClient } from '@supabase/supabase-js';
 import { getConfig } from '../../core/config.js';
 import { writeLog } from '../../action-log/src/index.js';
 
@@ -175,6 +174,7 @@ async function realVerifyWordPress(
 
 async function realUpsertSite(record: SiteRecord): Promise<void> {
   const cfg    = getConfig();
+  const { createClient } = await import('@supabase/supabase-js');
   const client = createClient(cfg.supabaseUrl, cfg.supabaseServiceKey, {
     auth: { persistSession: false },
   });
