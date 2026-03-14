@@ -110,19 +110,21 @@ export async function GET(req: NextRequest) {
   }
 
   // --- Upsert site + credential in Supabase ---
+  let existing: { site_id: string } | null = null;
+  let siteId = '';
   try {
     const db = createServerClient();
     const storeUrl = `https://${shop}`;
 
     // Check if site already exists
-    const { data: existing } = await db
+    const { data: existingData } = await db
       .from('sites')
       .select('site_id')
       .eq('tenant_id', HARDCODED_TENANT)
       .eq('site_url', storeUrl)
       .maybeSingle();
+    existing = existingData;
 
-    let siteId: string;
     if (existing) {
       siteId = existing.site_id;
     } else {

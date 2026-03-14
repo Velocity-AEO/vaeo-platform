@@ -99,9 +99,9 @@ export function computeStatsDelta(
   try {
     const delta: Partial<SiteStats> = {};
     for (const field of NUMERIC_FIELDS) {
-      const cur  = (current  as Record<string, unknown>)[field] as number ?? 0;
-      const prev = (previous as Record<string, unknown>)[field] as number ?? 0;
-      (delta as Record<string, unknown>)[field] = cur - prev;
+      const cur  = (current  as unknown as Record<string, unknown>)[field] as number ?? 0;
+      const prev = (previous as unknown as Record<string, unknown>)[field] as number ?? 0;
+      (delta as unknown as Record<string, unknown>)[field] = cur - prev;
     }
     return delta;
   } catch {

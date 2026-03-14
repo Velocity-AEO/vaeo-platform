@@ -177,7 +177,7 @@ export function simulateRankingHistory(
       // Set snapshot_date to the correct past date
       const date = new Date();
       date.setDate(date.getDate() - d);
-      (snap as Record<string, unknown>).snapshot_date = date.toISOString();
+      (snap as unknown as Record<string, unknown>).snapshot_date = date.toISOString();
 
       snapshots.push(snap);
     }

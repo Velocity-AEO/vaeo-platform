@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
-import { getLearnings, type LearningsDeps, type LearningsQuery } from './handler.ts';
+import { getLearnings, type LearningsDeps, type LearningsQuery } from './handler';
 
 function makeDeps(): LearningsDeps {
   const db = createServerClient();

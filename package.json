@@ -40,6 +40,8 @@
     "typescript": "^5.7.2"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.78.0",
+    "@supabase/supabase-js": "^2.99.1",
     "liquidjs": "^10.25.0"
   }
 }

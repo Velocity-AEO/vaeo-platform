@@ -25,6 +25,9 @@ export interface AEOApplyDeps {
     url: string;
     page_title: string;
     page_type: string;
+    meta_description?: string;
+    h1?: string;
+    body_text?: string;
     content_selectors?: string[];
   }) => Promise<{
     schema: Record<string, unknown>;
@@ -68,7 +71,15 @@ function defaultAEODeps(): AEOApplyDeps {
   return {
     generateSpeakable: async (config) => {
       const { generateSpeakable } = await import('../aeo/speakable_generator.js');
-      return generateSpeakable(config);
+      const r = await generateSpeakable({
+        url: config.url,
+        page_title: config.page_title,
+        page_type: config.page_type,
+        meta_description: config.meta_description ?? '',
+        h1: config.h1 ?? '',
+        body_text: config.body_text ?? '',
+      });
+      return { schema: r.speakable_schema, liquid_snippet: r.liquid_snippet, confidence: r.confidence };
     },
     buildFAQSchema: async (url, html, config) => {
       const { buildFAQSchema } = await import('../aeo/faq_generator.js');

@@ -398,7 +398,7 @@ export default function ClientDashboard() {
                 />
                 <Tooltip
                   contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e2e8f0' }}
-                  formatter={(v: number) => [`${v}`, 'Health Score']}
+                  formatter={(v) => [`${v}`, 'Health Score']}
                 />
                 <Line
                   type="monotone"

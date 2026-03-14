@@ -136,7 +136,7 @@ export async function fetchRankingsForSite(
           .select('access_token')
           .eq('site_id', site_id)
           .maybeSingle();
-        gsc_token = data?.access_token ?? undefined;
+        gsc_token = (data?.access_token as string | undefined) ?? undefined;
       }
     } catch {
       // DB unavailable — token stays undefined

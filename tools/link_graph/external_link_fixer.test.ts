@@ -115,7 +115,7 @@ describe('buildExternalLinkFix', () => {
   });
 
   it('fix includes source_url from check', () => {
-    const check = makeCheck({ is_broken: true, status_code: 500, source_url: 'https://src.com/page' });
+    const check = makeCheck({ is_broken: true, status_code: 500, url: 'https://src.com/page' });
     const fix = buildExternalLinkFix(check, '');
     assert.equal(fix?.source_url, 'https://src.com/page');
   });

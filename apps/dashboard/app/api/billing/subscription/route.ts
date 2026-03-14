@@ -92,14 +92,14 @@ export async function GET() {
     const fixesUsed  = fixesCount  ?? 0;
 
     const billingStatus = t.billing_status ?? 'active';
-    const periodEnd = (t as Record<string, unknown>).billing_period_end as string | undefined;
+    const periodEnd = (t as unknown as Record<string, unknown>).billing_period_end as string | undefined;
 
     const state = computeBillingState(
       HARDCODED_TENANT,
       tier,
       billingStatus,
       { sites: sitesUsed, crawls: crawlsUsed, fixes: fixesUsed },
-      { sites: limits.max_sites, crawls: limits.max_crawls_per_month, fixes: limits.max_fixes_per_month },
+      { sites: limits.sites_allowed, crawls: limits.crawls_per_month, fixes: limits.fixes_per_month },
       periodEnd,
     );
 

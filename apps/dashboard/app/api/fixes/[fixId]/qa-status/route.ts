@@ -39,7 +39,7 @@ export async function GET(
     //   .maybeSingle();
 
     // For now, return "not yet run" stub
-    const data: ViewportQARecord | null = null;
+    const data = null as ViewportQARecord | null;
 
     if (data) {
       return NextResponse.json({

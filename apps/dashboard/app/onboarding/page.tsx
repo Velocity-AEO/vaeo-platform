@@ -1,5 +1,6 @@
 'use client';
 
+import { Suspense } from 'react';
 import { useState, FormEvent, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 
@@ -14,7 +15,7 @@ const STEPS: { key: WizardStep; label: string }[] = [
   { key: 'complete',        label: 'Complete' },
 ];
 
-export default function OnboardingPage() {
+function OnboardingContent() {
   const searchParams = useSearchParams();
   const siteIdParam  = searchParams.get('site_id');
   const stepParam    = searchParams.get('step') as WizardStep | null;
@@ -353,5 +354,13 @@ export default function OnboardingPage() {
         )}
       </div>
     </main>
+  );
+}
+
+export default function OnboardingPage() {
+  return (
+    <Suspense fallback={<main className="min-h-screen bg-slate-50 flex items-center justify-center"><div className="text-sm text-slate-500">Loading...</div></main>}>
+      <OnboardingContent />
+    </Suspense>
   );
 }

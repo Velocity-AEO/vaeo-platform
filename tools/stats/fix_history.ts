@@ -225,7 +225,7 @@ export function simulateFixHistory(
       const appliedAt = new Date(Date.now() - daysAgo * 86_400_000);
 
       const entry = buildFixHistoryEntry(site_id, url, fix_type, 'before value', 'after value');
-      (entry as Record<string, unknown>).applied_at = appliedAt.toISOString();
+      (entry as unknown as Record<string, unknown>).applied_at = appliedAt.toISOString();
       entries.push(entry);
     }
 

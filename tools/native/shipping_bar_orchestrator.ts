@@ -30,8 +30,8 @@ export async function deployShippingBar(
   config?:              Partial<ShippingBarConfig>,
   dry_run?:             boolean,
   deps?: {
-    writeSnippet?: Parameters<typeof installComponent>[3]['writeSnippet'];
-    updateTheme?:  Parameters<typeof installComponent>[3]['updateTheme'];
+    writeSnippet?: NonNullable<Parameters<typeof installComponent>[3]>['writeSnippet'];
+    updateTheme?:  NonNullable<Parameters<typeof installComponent>[3]>['updateTheme'];
   },
 ): Promise<{
   component:      NativeComponent;

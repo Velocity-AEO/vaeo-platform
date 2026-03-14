@@ -184,8 +184,8 @@ const fixTypeRegistryComplete: QACheck = {
       const missing: string[] = [];
       for (const ft of coreTypes) {
         const html = '<html><head></head><body></body></html>';
-        const fixed = mod.applyTextFixes(html, [ft]);
-        if (fixed === html && ft !== 'schema_missing') {
+        const { html: fixedHtml } = mod.applyTextFixes(html, [ft]);
+        if (fixedHtml === html && ft !== 'schema_missing') {
           // schema_missing may not change simple HTML — skip that check
           missing.push(ft);
         }

@@ -157,7 +157,7 @@ export function shouldAlert(
       return { alert: true, reason: `Gradual degradation — projected to reach ${projected_score_30d} in 30 days` };
     }
 
-    if (trend === 'volatile' && current_score !== null && current_score < 75) {
+    if (trend === 'volatile' && current_score != null && current_score < 75) {
       return { alert: true, reason: 'Volatile performance scores — investigate instability' };
     }
 

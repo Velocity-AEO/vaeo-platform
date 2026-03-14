@@ -288,7 +288,7 @@ export default function LinkTreeMap({
     if (dragging) {
       setZoom((z) => ({ ...z, x: e.clientX - dragStart.x, y: e.clientY - dragStart.y }));
     }
-    handleCanvasMouseMove(e);
+    handleCanvasMouseMove(e as React.MouseEvent<HTMLCanvasElement>);
   }
 
   function handleMouseUp() {

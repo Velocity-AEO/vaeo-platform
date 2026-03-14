@@ -128,9 +128,10 @@ export async function approveItem(
 
           // Execute the real schema write
           const execResult = await deps.executeSchemaFn(id, row).catch(() => ({
-            ok:     false as const,
-            status: 'failed' as const,
-            error:  'executeSchemaFn threw unexpectedly',
+            ok:           false as const,
+            status:       'failed' as const,
+            error:        'executeSchemaFn threw unexpectedly',
+            rolled_back:  false as const,
           }));
 
           // Transition to final status

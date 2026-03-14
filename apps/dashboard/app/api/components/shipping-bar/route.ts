@@ -68,7 +68,7 @@ export async function DELETE(req: NextRequest) {
       revertTheme:   async () => ({ success: true }),
     });
     return NextResponse.json(
-      { success: true, component_id: body.component_id ?? component.component_id, ...result },
+      { component_id: body.component_id ?? component.component_id, ...result },
       { headers: { 'Cache-Control': 'no-store' } },
     );
   } catch (err) {

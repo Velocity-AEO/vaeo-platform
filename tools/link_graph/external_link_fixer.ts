@@ -26,7 +26,7 @@ export function buildExternalLinkFix(
   try {
     if (!check) return null;
 
-    const { source_url, destination_url, status_code, is_broken, is_redirect, final_url, redirect_hops, domain_reputation, is_nofollow } = check;
+    const { url: source_url, destination_url, status_code, is_broken, is_redirect, final_url, redirect_hops, domain_reputation, is_nofollow } = check;
 
     // 1. Broken link → remove
     if (is_broken) {

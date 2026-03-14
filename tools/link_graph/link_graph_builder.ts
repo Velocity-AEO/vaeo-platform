@@ -9,6 +9,7 @@
  */
 
 import type { InternalLink, ExternalLink, PageNode } from './types.js';
+import type { InternalLink as RichInternalLink, ExternalLink as RichExternalLink, PageNode as RichPageNode } from './link_graph_types.js';
 import { runDepthAnalysis, type DepthResult } from './link_depth_calculator.js';
 import { scoreAllPages, type AuthorityScore } from './authority_scorer.js';
 import { analyzeAllAnchors, type AnchorTextProfile } from './anchor_text_analyzer.js';
@@ -139,8 +140,8 @@ export async function buildLinkGraph(
     let canonical_conflicts_count = 0;
     try {
       const canonicalResult = await scanSiteForCanonicalConflicts(site_id, {
-        loadLinksFn: async () => internalLinks ?? [],
-        loadPagesFn: async () => pages ?? [],
+        loadLinksFn: async (_sid: string) => (internalLinks ?? []) as unknown as RichInternalLink[],
+        loadPagesFn: async (_sid: string) => (pages ?? []) as unknown as RichPageNode[],
       });
       canonical_conflicts_count = canonicalResult.total_conflicts;
     } catch (err) {
@@ -151,8 +152,8 @@ export async function buildLinkGraph(
     let link_limit_violations_count = 0;
     try {
       const limitResult = await scanAllPagesForLinkLimits(site_id, {
-        loadPagesFn: async () => (pages ?? []).map((p) => ({ url: p.url, title: p.title })),
-        loadLinksFn: async () => ({ internal: internalLinks ?? [], external: externalLinks ?? [] }),
+        loadPagesFn: async (_sid: string) => (pages ?? []).map((p) => ({ url: p.url, title: p.title })),
+        loadLinksFn: async (_sid: string) => ({ internal: (internalLinks ?? []) as unknown as RichInternalLink[], external: (externalLinks ?? []) as unknown as RichExternalLink[] }),
       });
       link_limit_violations_count = limitResult.violations.length;
     } catch (err) {

@@ -192,6 +192,7 @@ export async function runSchemaValidator(
   });
 
   log({
+    command:  'schema-validator',
     stage:    'schema-validator:start',
     status:   'pending',
     metadata: { block_count: request.schema_blocks.length },
@@ -217,6 +218,7 @@ export async function runSchemaValidator(
   };
 
   log({
+    command:  'schema-validator',
     stage:    'schema-validator:complete',
     status:   passed ? 'ok' : 'failed',
     metadata: {
@@ -235,6 +237,7 @@ export async function runSchemaValidator(
       .map((b) => ({ type: b.schema_type, errors: b.errors }));
 
     log({
+      command:  'schema-validator',
       stage:    'schema-validator:blocked',
       status:   'failed',
       metadata: { failed_blocks: failedTypes },

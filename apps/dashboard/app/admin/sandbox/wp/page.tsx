@@ -6,7 +6,7 @@ import {
   getPassRateLabel,
   getPassRateColor,
   formatFailureReason,
-} from '../../../lib/sandbox_health_display.js';
+} from '@/lib/sandbox_health_display';
 
 export default function AdminSandboxDashboard() {
   const [health, setHealth] = useState<PlatformSandboxHealth | null>(null);

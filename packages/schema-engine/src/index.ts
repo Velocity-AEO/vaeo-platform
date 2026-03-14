@@ -373,6 +373,7 @@ export function generateSchema(req: SchemaRequest): SchemaResult {
       url:          req.url,
     };
     log({
+      command:  'schema-engine',
       stage:    'schema-engine:skipped',
       status:   'skipped',
       metadata: { page_type: req.page_type, reason: 'insufficient_data' },
@@ -400,6 +401,7 @@ export function generateSchema(req: SchemaRequest): SchemaResult {
         ),
       );
       log({
+        command:  'schema-engine',
         stage:    'schema-engine:skipped',
         status:   'skipped',
         metadata: { schema_type: conflict, reason: 'singleton_collision' },
@@ -441,6 +443,7 @@ export function generateSchema(req: SchemaRequest): SchemaResult {
   if (parseError) allIssues.push(`parse_error:${parseError}`);
 
   log({
+    command:  'schema-engine',
     stage:    'schema-engine:generated',
     status:   'ok',
     metadata: {

@@ -97,7 +97,7 @@ function EventCard({ event }: { event: DebugEvent }) {
       {expanded && (
         <div className="px-4 pb-3 border-t border-slate-100 bg-slate-50 space-y-2">
           {/* Diff summary */}
-          {event.metadata?.['change_summary'] && (
+          {!!event.metadata?.['change_summary'] && (
             <p className="text-xs text-slate-600 font-medium">
               Diff: {String(event.metadata['change_summary'])}
             </p>

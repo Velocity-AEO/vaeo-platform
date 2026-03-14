@@ -1,5 +1,6 @@
 'use client';
 
+import { Suspense } from 'react';
 import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
@@ -26,7 +27,7 @@ const STEPS: { key: Step; label: string }[] = [
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function ShopifyOnboardingPage() {
+function ShopifyOnboardingContent() {
   const searchParams = useSearchParams();
 
   const [step, setStep]       = useState<Step>('enter_domain');
@@ -254,5 +255,13 @@ export default function ShopifyOnboardingPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function ShopifyOnboardingPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-slate-50 flex items-center justify-center"><div className="text-sm text-slate-500">Loading...</div></div>}>
+      <ShopifyOnboardingContent />
+    </Suspense>
   );
 }

@@ -181,7 +181,7 @@ export async function POST(
       failed++;
       const message = err instanceof Error ? err.message : String(err);
       errors.push(`${item.id}: ${message}`);
-      results.push({ success: false, item_id: item.id, error: message });
+      results.push({ success: false, action_id: item.id, fix_type: '', error: message });
     }
   }
 

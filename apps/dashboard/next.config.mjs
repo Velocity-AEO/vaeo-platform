@@ -8,6 +8,10 @@ const repoRoot = path.resolve(__dirname, '../../');
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  eslint: {
+    // Lint is enforced in a separate CI step — don't block the production build.
+    ignoreDuringBuilds: true,
+  },
   experimental: {
     // Include files outside apps/dashboard in Vercel's output file tracing
     outputFileTracingRoot: repoRoot,

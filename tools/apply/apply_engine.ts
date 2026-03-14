@@ -315,6 +315,7 @@ const realWriteLog: ApplyDeps['writeLog'] = (entry) => {
         cms:       'shopify',
         command:   'apply-engine',
         ...entry,
+        status: entry.status as 'ok' | 'failed' | 'pending' | 'skipped',
       });
     } catch { /* non-fatal */ }
   })();
@@ -851,12 +852,12 @@ export async function applyFix(
   }
 
   // Build Shopify fix request
-  const afterValue = buildAfterValue(fixType, item.proposed_fix);
+  const afterValue = buildAfterValue(fixType as ShopifyFixType, item.proposed_fix);
   const request: ShopifyFixRequest = {
     action_id:    item.id,
     access_token: creds.access_token,
     store_url:    creds.store_url,
-    fix_type:     fixType,
+    fix_type:     fixType as ShopifyFixType,
     target_url:   item.url,
     before_value: {},
     after_value:  afterValue,

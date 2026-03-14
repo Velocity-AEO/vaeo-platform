@@ -20,7 +20,7 @@
  *   h1, schema, redirect
  */
 
-import type { CMSAdapter, PatchManifest, TemplateRef, UrlEntry } from '../../../packages/core/types.js';
+import type { CMSAdapter, PatchManifest, TemplateRef, UrlEntry } from '../../../core/types.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

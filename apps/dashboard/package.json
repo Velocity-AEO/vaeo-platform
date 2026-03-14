@@ -11,13 +11,15 @@
     "test": "node --import tsx/esm --test app/api/all-tests.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.78.0",
     "@sentry/nextjs": "^10.43.0",
     "@supabase/ssr": "^0.9.0",
     "@supabase/supabase-js": "^2.98.0",
     "next": "14.2.35",
     "react": "^18",
     "react-dom": "^18",
-    "recharts": "^3.8.0"
+    "recharts": "^3.8.0",
+    "stripe": "^20.4.1"
   },
   "devDependencies": {
     "@types/node": "^20",

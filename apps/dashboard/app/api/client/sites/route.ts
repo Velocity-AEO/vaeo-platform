@@ -9,7 +9,7 @@ function buildDeps(): ClientSitesDeps {
     loadSites: async (tenantId) => {
       const { data, error } = await db
         .from('sites')
-        .select('site_id, site_url, cms_type, created_at')
+        .select('site_id, site_url, cms_type, created_at, health_score, health_grade, last_scored_at')
         .eq('tenant_id', tenantId)
         .order('created_at', { ascending: false });
       if (error) throw new Error(error.message);

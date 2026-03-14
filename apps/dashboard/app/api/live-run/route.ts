@@ -72,6 +72,7 @@ async function mockExecuteFixBatch(
       success, html_before: '<html></html>', html_after: '<html><title>Fixed</title></html>',
       sandbox_passed: success, deployed: success && !dry_run, dry_run,
       error: success ? undefined : 'Sandbox regression detected',
+      timed_out: false, elapsed_ms: 120 + i * 10,
       debug_events: [`[apply] ${issue.fix_type}`, `[sandbox] passed=${success}`],
     };
   });

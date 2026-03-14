@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
 import { updateApprovalStatus } from '@tools/learning/approval_queue.js';
 import { updateLearning } from '@tools/learning/learning_logger.js';
-import { approveItem, type ApprovalsDeps } from '../../handler.ts';
+import { approveItem, type ApprovalsDeps } from '../../handler';
 
 function makeDeps(): ApprovalsDeps {
   const db = createServerClient();
