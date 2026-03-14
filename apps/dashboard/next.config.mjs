@@ -26,7 +26,8 @@ const nextConfig = {
     // it walks up from those files looking for node_modules — and never reaches
     // apps/dashboard/node_modules. Prepend it explicitly so all deps resolve.
     config.resolve.modules = [
-      path.join(__dirname, 'node_modules'),
+      path.join(__dirname, 'node_modules'),        // apps/dashboard/node_modules
+      path.resolve(__dirname, '../../node_modules'), // repo root node_modules
       'node_modules',
     ];
     return config;
