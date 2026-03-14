@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
-import { computeAIVisibilityScore, computeScoreHistory, type AICitationSummary } from '../../../../../../../tools/ai-visibility/visibility_score.js';
-import { analyzeCompetitorGap, getTopOpportunities } from '../../../../../../../tools/ai-visibility/competitor_gap.js';
-import { simulateSchemaOpportunities } from '../../../../../../../tools/ai-visibility/schema_opportunity.js';
-import { generateAIVisibilityReport } from '../../../../../../../tools/ai-visibility/ai_visibility_orchestrator.js';
+import { computeAIVisibilityScore, computeScoreHistory, type AICitationSummary } from '@tools/ai-visibility/visibility_score.js';
+import { analyzeCompetitorGap, getTopOpportunities } from '@tools/ai-visibility/competitor_gap.js';
+import { simulateSchemaOpportunities } from '@tools/ai-visibility/schema_opportunity.js';
+import { generateAIVisibilityReport } from '@tools/ai-visibility/ai_visibility_orchestrator.js';
 
 function deriveBrandName(domain: string): string {
   const base = (domain ?? '').replace(/\.(com|net|org|io|co|shop|store).*$/, '');

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { SandboxHealthMetrics } from '../../../tools/sandbox/sandbox_health_aggregator.js';
+import type { SandboxHealthMetrics } from '@tools/sandbox/sandbox_health_aggregator.js';
 import {
   getPassRateLabel,
   getPassRateColor,

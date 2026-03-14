@@ -4,7 +4,7 @@ import {
   searchArticles,
   ARTICLE_REGISTRY,
   type ArticleCategory,
-} from '../../../../tools/learning_center/article_registry.js';
+} from '@tools/learning_center/article_registry.js';
 
 /**
  * GET /api/learn

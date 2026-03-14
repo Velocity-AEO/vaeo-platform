@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   translateObservationToSpec,
   type TranslatorInput,
-} from '../../../../../../../tools/native/translator.js';
+} from '@tools/native/translator.js';
 
 /**
  * POST /api/native/translate

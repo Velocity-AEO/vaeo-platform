@@ -6,7 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { fetchAgencyHealthOverview } from '../../../../../../tools/agency/agency_health_overview.js';
+import { fetchAgencyHealthOverview } from '@tools/agency/agency_health_overview.js';
 
 export async function GET(
   _req: NextRequest,

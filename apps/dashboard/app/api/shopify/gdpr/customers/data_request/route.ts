@@ -11,7 +11,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   validateShopifyHMAC,
   extractRawBody,
-} from '../../../../../../../../tools/shopify/gdpr/shopify_hmac_validator.js';
+} from '@tools/shopify/gdpr/shopify_hmac_validator.js';
 
 const WEBHOOK_SECRET = process.env.SHOPIFY_WEBHOOK_SECRET ?? '';
 

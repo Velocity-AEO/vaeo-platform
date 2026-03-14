@@ -6,8 +6,8 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { exportInternalLinks } from '../../../../../../../../../tools/link_graph/link_graph_exporter.js';
-import type { InternalLink } from '../../../../../../../../../tools/link_graph/link_graph_types.js';
+import { exportInternalLinks } from '@tools/link_graph/link_graph_exporter.js';
+import type { InternalLink } from '@tools/link_graph/link_graph_types.js';
 
 type Ctx = { params: Promise<{ siteId: string }> };
 

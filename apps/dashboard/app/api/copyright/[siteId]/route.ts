@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
-import { simulateFingerprints } from '../../../../../../../tools/copyright/fingerprint.js';
-import { simulateScrapeMatches } from '../../../../../../../tools/copyright/scrape_detector.js';
-import { simulateCopyrightReport } from '../../../../../../../tools/copyright/copyright_report.js';
+import { simulateFingerprints } from '@tools/copyright/fingerprint.js';
+import { simulateScrapeMatches } from '@tools/copyright/scrape_detector.js';
+import { simulateCopyrightReport } from '@tools/copyright/copyright_report.js';
 
 export async function GET(
   _request: Request,

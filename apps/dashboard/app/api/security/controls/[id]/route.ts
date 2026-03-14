@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { SOC2_CONTROLS } from '../../../../../../tools/security/control_library.js';
+import { SOC2_CONTROLS } from '@tools/security/control_library.js';
 
 export async function GET(
   _req: Request,

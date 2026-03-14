@@ -5,7 +5,7 @@
  * Never throws.
  */
 
-import type { IssueSeverity } from '../../../tools/health/health_score_weights.js';
+import type { IssueSeverity } from '@tools/health/health_score_weights.js';
 
 // ── Issue type labels ────────────────────────────────────────────────────────
 

@@ -5,7 +5,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { runTagCleanupJob } from '../../../../../../tools/gsc/gsc_tag_cleanup.js';
+import { runTagCleanupJob } from '@tools/gsc/gsc_tag_cleanup.js';
 
 export async function POST(
   _req: NextRequest,

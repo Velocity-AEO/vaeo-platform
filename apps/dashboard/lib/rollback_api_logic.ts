@@ -6,8 +6,8 @@
  * Never throws.
  */
 
-import { isWithinRollbackWindow } from '../../../tools/rollback/rollback_window_matrix.js';
-import type { RollbackResult } from '../../../tools/rollback/rollback_engine.js';
+import { isWithinRollbackWindow } from '@tools/rollback/rollback_window_matrix.js';
+import type { RollbackResult } from '@tools/rollback/rollback_engine.js';
 
 // ── buildRollbackRequest ──────────────────────────────────────────────────────
 

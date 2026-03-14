@@ -1,6 +1,6 @@
 'use client';
 
-import type { OnboardingStep, OnboardingProgress } from '../../../tools/onboarding/onboarding_progress.js';
+import type { OnboardingStep, OnboardingProgress } from '@tools/onboarding/onboarding_progress.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 

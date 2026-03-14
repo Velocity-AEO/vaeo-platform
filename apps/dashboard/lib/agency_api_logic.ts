@@ -8,11 +8,11 @@
 import {
   AGENCY_PLAN_LIMITS,
   type AgencyPlan,
-} from '../../../tools/agency/agency_account.js';
+} from '@tools/agency/agency_account.js';
 import {
   AGENCY_PLAN_PRICES_CENTS,
   formatAgencyAmount,
-} from '../../../tools/agency/agency_billing.js';
+} from '@tools/agency/agency_billing.js';
 
 // ── buildAgencyCreateRequest ──────────────────────────────────────────────────
 

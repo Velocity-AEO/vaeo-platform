@@ -6,8 +6,8 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { buildDigestEmailHTML, type DigestEmailData } from '../../../../../../../tools/notifications/digest_email_template.js';
-import { loadWhiteLabelConfig, applyWhiteLabelToDigest } from '../../../../../../../tools/notifications/digest_white_label.js';
+import { buildDigestEmailHTML, type DigestEmailData } from '@tools/notifications/digest_email_template.js';
+import { loadWhiteLabelConfig, applyWhiteLabelToDigest } from '@tools/notifications/digest_white_label.js';
 
 interface RouteContext {
   params: Promise<{ siteId: string }>;

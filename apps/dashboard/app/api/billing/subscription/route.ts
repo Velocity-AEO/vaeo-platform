@@ -5,11 +5,11 @@ import {
   getPlanLimits,
   type PlanTier,
   type PlanLimits,
-} from '../../../../../../../tools/billing/plan_definitions.js';
+} from '@tools/billing/plan_definitions.js';
 import {
   computeBillingState,
   PLAN_PRICES,
-} from '../../../../../../../tools/billing/billing_state.js';
+} from '@tools/billing/billing_state.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 

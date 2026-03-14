@@ -5,7 +5,7 @@ import {
   getAppReplacements,
   getReplacementSummary,
   type AppReplacementDeps,
-} from '../../../../../../../tools/apps/app_replacement_library.js';
+} from '@tools/apps/app_replacement_library.js';
 
 function buildDeps(): AppReplacementDeps {
   const db = createServerClient();

@@ -6,7 +6,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
-import { buildTenantDigest, type DigestPeriod } from '../../../../../../tools/email/digest_aggregator.js';
+import { buildTenantDigest, type DigestPeriod } from '@tools/email/digest_aggregator.js';
 
 export async function GET(request: NextRequest) {
   try {

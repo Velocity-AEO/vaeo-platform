@@ -5,7 +5,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { calculatePlatformHealth } from '../../../../../../tools/sandbox/sandbox_health_aggregator.js';
+import { calculatePlatformHealth } from '@tools/sandbox/sandbox_health_aggregator.js';
 
 export async function GET(
   request: NextRequest,

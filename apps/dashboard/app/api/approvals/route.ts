@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
-import { getApprovalQueue, updateApprovalStatus } from '../../../../../tools/learning/approval_queue.js';
-import { updateLearning } from '../../../../../tools/learning/learning_logger.js';
+import { getApprovalQueue, updateApprovalStatus } from '@tools/learning/approval_queue.js';
+import { updateLearning } from '@tools/learning/learning_logger.js';
 import { getApprovals, type ApprovalsDeps } from './handler.ts';
 
 function makeDeps(): ApprovalsDeps {

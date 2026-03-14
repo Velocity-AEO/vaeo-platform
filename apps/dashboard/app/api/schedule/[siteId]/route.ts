@@ -10,9 +10,9 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
-import { scheduleSiteCrawl, getScheduleStatus } from '../../../../../../tools/jobs/scheduler.js';
-import { checkBillingGate } from '../../../../../../tools/billing/billing_gate.js';
-import type { UsageDb } from '../../../../../../tools/billing/usage_tracker.js';
+import { scheduleSiteCrawl, getScheduleStatus } from '@tools/jobs/scheduler.js';
+import { checkBillingGate } from '@tools/billing/billing_gate.js';
+import type { UsageDb } from '@tools/billing/usage_tracker.js';
 
 export async function GET(
   _req: NextRequest,

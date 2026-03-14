@@ -2,12 +2,12 @@
 
 import { useState, useMemo } from 'react';
 import { canShowRollbackButton, getRollbackStatusMessage, buildRollbackRequest } from '../lib/rollback_api_logic';
-import type { RollbackResult } from '../../../tools/rollback/rollback_engine';
+import type { RollbackResult } from '@tools/rollback/rollback_engine';
 import {
   getRollbackWindowLabel,
   getTimeRemainingInWindow,
   isWithinRollbackWindow,
-} from '../../../tools/rollback/rollback_window_matrix';
+} from '@tools/rollback/rollback_window_matrix';
 
 interface RollbackButtonProps {
   fix_id:                 string;

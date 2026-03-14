@@ -10,7 +10,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
-import { scheduleAllSites, getScheduleStatus } from '../../../../../tools/jobs/scheduler.js';
+import { scheduleAllSites, getScheduleStatus } from '@tools/jobs/scheduler.js';
 
 export async function GET() {
   const db = createServerClient();
@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
   try {
     if (siteIds && siteIds.length > 0) {
       // Schedule only specified sites
-      const { scheduleAllSites: _sa, ...rest } = await import('../../../../../tools/jobs/scheduler.js');
+      const { scheduleAllSites: _sa, ...rest } = await import('@tools/jobs/scheduler.js');
       const { scheduleSiteCrawl } = rest;
 
       // Get site URLs for specified IDs

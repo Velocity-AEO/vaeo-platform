@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { scanEnvironment } from '../../../../../../../tools/apps/environment_scanner.js';
-import { buildEnvironmentDiffReport } from '../../../../../../../tools/apps/environment_diff_report.js';
+import { scanEnvironment } from '@tools/apps/environment_scanner.js';
+import { buildEnvironmentDiffReport } from '@tools/apps/environment_diff_report.js';
 
 export async function GET(
   _request: Request,

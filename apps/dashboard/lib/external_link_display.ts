@@ -5,7 +5,7 @@
  * Never throws.
  */
 
-import type { DomainReputation } from '../../tools/link_graph/external_link_checker.js';
+import type { DomainReputation } from '@tools/link_graph/external_link_checker.js';
 
 // ── getReputationBadge ────────────────────────────────────────────────────────
 

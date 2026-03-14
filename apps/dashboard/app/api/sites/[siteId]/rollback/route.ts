@@ -10,14 +10,14 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { rollbackFix, rollbackLastFix, type RollbackTarget } from '../../../../../../tools/rollback/rollback_engine.js';
-import { buildRollbackRecord, getRollbackBlockReason } from '../../../../../../tools/rollback/rollback_history.js';
+import { rollbackFix, rollbackLastFix, type RollbackTarget } from '@tools/rollback/rollback_engine.js';
+import { buildRollbackRecord, getRollbackBlockReason } from '@tools/rollback/rollback_history.js';
 import {
   isWithinRollbackWindow,
   getRollbackWindowHours,
   getRollbackWindowLabel,
   calculateRollbackDeadline,
-} from '../../../../../../tools/rollback/rollback_window_matrix.js';
+} from '@tools/rollback/rollback_window_matrix.js';
 
 interface RouteContext {
   params: Promise<{ siteId: string }>;

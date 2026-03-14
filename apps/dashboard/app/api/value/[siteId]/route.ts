@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
-import { generateValueReport, exportReportAsText } from '../../../../../../../tools/value/value_report.js';
-import type { SiteStats, RankingSnapshot, KeywordRanking } from '../../../../../../../tools/value/value_calculator.js';
-import type { FixHistoryEntry } from '../../../../../../../tools/value/before_after.js';
-import type { FixHistoryPage } from '../../../../../../../tools/value/value_report.js';
+import { generateValueReport, exportReportAsText } from '@tools/value/value_report.js';
+import type { SiteStats, RankingSnapshot, KeywordRanking } from '@tools/value/value_calculator.js';
+import type { FixHistoryEntry } from '@tools/value/before_after.js';
+import type { FixHistoryPage } from '@tools/value/value_report.js';
 
 // ── Mock data ────────────────────────────────────────────────────────────────
 

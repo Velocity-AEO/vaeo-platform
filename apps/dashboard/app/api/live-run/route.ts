@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server';
-import { runLiveProduction } from '../../../../../tools/live/live_run_orchestrator.js';
-import { defaultTarget, type LiveRunTarget } from '../../../../../tools/live/live_run_config.js';
-import type { CrawlResult, DiscoveredPage } from '../../../../../tools/live/page_discovery.js';
-import type { AggregatedIssue, IssueAggregation } from '../../../../../tools/live/issue_aggregator.js';
-import type { FixBatch, FixAttempt } from '../../../../../tools/live/live_fix_executor.js';
-import type { SystemHealthReport } from '../../../../../tools/live/live_run_orchestrator.js';
+import { runLiveProduction } from '@tools/live/live_run_orchestrator.js';
+import { defaultTarget, type LiveRunTarget } from '@tools/live/live_run_config.js';
+import type { CrawlResult, DiscoveredPage } from '@tools/live/page_discovery.js';
+import type { AggregatedIssue, IssueAggregation } from '@tools/live/issue_aggregator.js';
+import type { FixBatch, FixAttempt } from '@tools/live/live_fix_executor.js';
+import type { SystemHealthReport } from '@tools/live/live_run_orchestrator.js';
 
 // Mock data for demo
 function mockDiscoverPages(): CrawlResult {

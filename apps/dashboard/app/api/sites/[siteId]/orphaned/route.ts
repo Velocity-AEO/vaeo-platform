@@ -7,7 +7,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import type { OrphanedPageIssue } from '../../../../../../../tools/orphaned/orphaned_page_issue_builder.js';
+import type { OrphanedPageIssue } from '@tools/orphaned/orphaned_page_issue_builder.js';
 
 type Ctx = { params: Promise<{ siteId: string }> };
 

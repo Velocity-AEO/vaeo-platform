@@ -11,8 +11,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   validateShopifyHMAC,
   extractRawBody,
-} from '../../../../../../../../tools/shopify/gdpr/shopify_hmac_validator.js';
-import { cancelShopifySubscription } from '../../../../../../../../tools/shopify/billing/shopify_billing.js';
+} from '@tools/shopify/gdpr/shopify_hmac_validator.js';
+import { cancelShopifySubscription } from '@tools/shopify/billing/shopify_billing.js';
 
 const WEBHOOK_SECRET = process.env.SHOPIFY_WEBHOOK_SECRET ?? '';
 

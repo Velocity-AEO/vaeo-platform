@@ -9,7 +9,7 @@ import { NextResponse } from 'next/server';
 import {
   buildLocalBusinessSiteReport,
   type LocalBusinessSiteReport,
-} from '../../../../../../../tools/reports/localbusiness_report.js';
+} from '@tools/reports/localbusiness_report.js';
 
 // ── Sample pages (representative local business HTML) ─────────────────────────
 

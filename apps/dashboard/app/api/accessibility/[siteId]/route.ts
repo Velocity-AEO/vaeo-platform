@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { buildAccessibilitySiteReport } from '../../../../../../../tools/reports/accessibility_report.js';
+import { buildAccessibilitySiteReport } from '@tools/reports/accessibility_report.js';
 
 export async function GET(
   _request: Request,

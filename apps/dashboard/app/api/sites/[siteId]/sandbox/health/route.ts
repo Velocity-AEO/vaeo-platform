@@ -5,7 +5,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { calculateSiteHealth } from '../../../../../../../../tools/sandbox/sandbox_health_aggregator.js';
+import { calculateSiteHealth } from '@tools/sandbox/sandbox_health_aggregator.js';
 
 interface RouteContext {
   params: Promise<{ siteId: string }>;

@@ -7,8 +7,8 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { applyExternalLinkFix } from '../../../../../../../../tools/link_graph/external_link_fixer.js';
-import type { ExternalLinkFix } from '../../../../../../../../tools/link_graph/external_link_fixer.js';
+import { applyExternalLinkFix } from '@tools/link_graph/external_link_fixer.js';
+import type { ExternalLinkFix } from '@tools/link_graph/external_link_fixer.js';
 
 type Ctx = { params: Promise<{ siteId: string }> };
 

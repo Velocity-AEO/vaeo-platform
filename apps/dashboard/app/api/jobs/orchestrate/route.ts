@@ -8,9 +8,9 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
-import { checkBillingGate } from '../../../../../../tools/billing/billing_gate.js';
-import type { UsageDb } from '../../../../../../tools/billing/usage_tracker.js';
-import { orchestrateJobs, type JobPriority, type OrchestratorDb } from '../../../../../../tools/jobs/job_orchestrator.js';
+import { checkBillingGate } from '@tools/billing/billing_gate.js';
+import type { UsageDb } from '@tools/billing/usage_tracker.js';
+import { orchestrateJobs, type JobPriority, type OrchestratorDb } from '@tools/jobs/job_orchestrator.js';
 
 function buildBillingDb(supabase: ReturnType<typeof createServerClient>): UsageDb {
   const currentPeriod = () => {

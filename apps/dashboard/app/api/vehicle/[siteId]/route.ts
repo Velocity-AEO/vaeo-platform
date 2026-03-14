@@ -3,7 +3,7 @@ import { createServerClient } from '@/lib/supabase';
 import {
   buildVehicleSiteReport,
   type VehicleSiteReport,
-} from '../../../../../../../tools/reports/vehicle_report.js';
+} from '@tools/reports/vehicle_report.js';
 
 // ── Route handler ────────────────────────────────────────────────────────────
 

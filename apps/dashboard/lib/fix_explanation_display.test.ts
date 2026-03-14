@@ -10,7 +10,7 @@ import {
   getCategoryBadgeConfig,
   formatExplanationPreview,
 } from './fix_explanation_display.js';
-import { getFixExplanation } from '../../../tools/explanations/fix_explanation_registry.js';
+import { getFixExplanation } from '@tools/explanations/fix_explanation_registry.js';
 
 // ── getCategoryBadgeConfig ───────────────────────────────────────────────────
 

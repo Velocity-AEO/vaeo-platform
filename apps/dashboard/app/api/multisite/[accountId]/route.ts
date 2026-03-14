@@ -8,14 +8,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   resolveAccountSites,
   shouldShowMultisiteDashboard,
-} from '../../../../../../tools/multisite/multisite_account_resolver.js';
-import { buildMultisiteSummary }  from '../../../../../../tools/multisite/multisite_aggregator.js';
+} from '@tools/multisite/multisite_account_resolver.js';
+import { buildMultisiteSummary }  from '@tools/multisite/multisite_aggregator.js';
 import {
   buildMultisiteResponse,
   buildEmptyMultisiteResponse,
   getMultisiteCacheHeader,
   parseAccountIdParam,
-} from '../../../../../../tools/multisite/multisite_api_logic.js';
+} from '@tools/multisite/multisite_api_logic.js';
 
 type Ctx = { params: Promise<{ accountId: string }> };
 

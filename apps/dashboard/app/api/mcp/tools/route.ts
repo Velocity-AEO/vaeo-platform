@@ -6,7 +6,7 @@
  */
 
 import { NextResponse } from 'next/server';
-import { getMcpToolList } from '../../../../../../tools/mcp/mcp_server.js';
+import { getMcpToolList } from '@tools/mcp/mcp_server.js';
 
 export async function GET() {
   const tools = await getMcpToolList();

@@ -4,7 +4,7 @@ import {
   getComplianceScore,
   getControlsByCriteria,
   type TrustServiceCriteria,
-} from '../../../../../tools/security/control_library.js';
+} from '@tools/security/control_library.js';
 
 export async function GET() {
   const score = getComplianceScore();

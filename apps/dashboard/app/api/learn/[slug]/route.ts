@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   getArticleBySlug,
   getRelatedArticles,
-} from '../../../../../tools/learning_center/article_registry.js';
+} from '@tools/learning_center/article_registry.js';
 
 /**
  * GET /api/learn/{slug}

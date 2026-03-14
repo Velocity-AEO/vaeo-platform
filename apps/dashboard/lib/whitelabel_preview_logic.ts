@@ -6,7 +6,7 @@
  * Never throws.
  */
 
-import type { WhiteLabelConfig } from '../../../tools/whitelabel/whitelabel_config.js';
+import type { WhiteLabelConfig } from '@tools/whitelabel/whitelabel_config.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 

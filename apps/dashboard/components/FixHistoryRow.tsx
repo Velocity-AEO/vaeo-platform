@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import type { FixExplanation } from '../../../tools/explanations/fix_explanation_registry.js';
+import type { FixExplanation } from '@tools/explanations/fix_explanation_registry.js';
 import { getCategoryBadgeConfig } from '../lib/fix_explanation_display.js';
 import FixConfidenceDisplay from './FixConfidenceDisplay';
 

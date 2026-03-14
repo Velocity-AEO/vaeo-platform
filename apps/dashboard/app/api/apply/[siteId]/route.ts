@@ -10,10 +10,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import * as Sentry from '@sentry/nextjs';
 import { createClient } from '@supabase/supabase-js';
-import { applyFix, type ApplyResult, type ApprovedItem, type ApplyDeps } from '../../../../../../tools/apply/apply_engine.js';
+import { applyFix, type ApplyResult, type ApprovedItem, type ApplyDeps } from '@tools/apply/apply_engine.js';
 import { applyFix as shopifyApplyFix } from '../../../../../../packages/adapters/shopify/src/index.js';
-import { checkBillingGate } from '../../../../../../tools/billing/billing_gate.js';
-import type { UsageDb } from '../../../../../../tools/billing/usage_tracker.js';
+import { checkBillingGate } from '@tools/billing/billing_gate.js';
+import type { UsageDb } from '@tools/billing/usage_tracker.js';
 
 function getDb() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? '';

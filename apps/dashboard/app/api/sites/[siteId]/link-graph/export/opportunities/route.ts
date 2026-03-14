@@ -6,8 +6,8 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { exportLinkOpportunities } from '../../../../../../../../../tools/link_graph/link_graph_exporter.js';
-import type { LinkSuggestion } from '../../../../../../../../../tools/link_graph/link_suggester.js';
+import { exportLinkOpportunities } from '@tools/link_graph/link_graph_exporter.js';
+import type { LinkSuggestion } from '@tools/link_graph/link_suggester.js';
 
 type Ctx = { params: Promise<{ siteId: string }> };
 

@@ -4,7 +4,7 @@
  * Pure logic for agency portal layout. Never throws.
  */
 
-import type { AgencyPlan } from '../../../tools/agency/agency_account.js';
+import type { AgencyPlan } from '@tools/agency/agency_account.js';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 

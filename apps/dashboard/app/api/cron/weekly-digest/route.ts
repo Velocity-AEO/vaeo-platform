@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server';
 import * as Sentry from '@sentry/nextjs';
 import { createServerClient } from '@/lib/supabase';
-import { scheduleWeeklyDigests, type SchedulerDeps, type TenantSite } from '../../../../../../tools/email/scheduler.js';
-import type { DigestDeps, ActionRow, HealthSnapshotRow } from '../../../../../../tools/email/digest.js';
+import { scheduleWeeklyDigests, type SchedulerDeps, type TenantSite } from '@tools/email/scheduler.js';
+import type { DigestDeps, ActionRow, HealthSnapshotRow } from '@tools/email/digest.js';
 
 // ── CRON_SECRET verification ─────────────────────────────────────────────────
 

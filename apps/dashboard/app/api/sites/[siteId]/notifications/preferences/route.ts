@@ -9,7 +9,7 @@ import {
   buildDefaultPreferences,
   mergePreferences,
   type NotificationPreferences,
-} from '../../../../../../../tools/notifications/notification_preferences';
+} from '@tools/notifications/notification_preferences';
 
 // ── Deps ─────────────────────────────────────────────────────────────────────
 

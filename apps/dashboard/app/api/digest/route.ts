@@ -8,7 +8,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
-import { sendDigestForTenant } from '../../../../../tools/email/digest_sender.js';
+import { sendDigestForTenant } from '@tools/email/digest_sender.js';
 
 export async function POST(request: NextRequest) {
   try {

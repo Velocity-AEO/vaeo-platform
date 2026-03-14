@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
-import { generateUnifiedReport } from '../../../../../../../../tools/ai-visibility/unified_signal.js';
+import { generateUnifiedReport } from '@tools/ai-visibility/unified_signal.js';
 import {
   simulateVisibilityHistory,
   computeVisibilityTrend,
-} from '../../../../../../../../tools/ai-visibility/visibility_history.js';
-import { analyzeCompetitorGap, getTopOpportunities } from '../../../../../../../../tools/ai-visibility/competitor_gap.js';
-import { simulateSchemaOpportunities } from '../../../../../../../../tools/ai-visibility/schema_opportunity.js';
+} from '@tools/ai-visibility/visibility_history.js';
+import { analyzeCompetitorGap, getTopOpportunities } from '@tools/ai-visibility/competitor_gap.js';
+import { simulateSchemaOpportunities } from '@tools/ai-visibility/schema_opportunity.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

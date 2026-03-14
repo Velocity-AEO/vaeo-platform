@@ -9,7 +9,7 @@ import {
   getRollbackStatusMessage,
   canShowRollbackButton,
 } from './rollback_api_logic.ts';
-import type { RollbackResult } from '../../../tools/rollback/rollback_engine.ts';
+import type { RollbackResult } from '@tools/rollback/rollback_engine.ts';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

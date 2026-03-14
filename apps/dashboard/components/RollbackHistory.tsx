@@ -1,8 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { RollbackRecord } from '../../../tools/rollback/rollback_history';
-import { getRollbackWindowLabel } from '../../../tools/rollback/rollback_window_matrix';
+import type { RollbackRecord } from '@tools/rollback/rollback_history';
+import { getRollbackWindowLabel } from '@tools/rollback/rollback_window_matrix';
 
 interface RollbackHistoryProps {
   site_id: string;

@@ -10,8 +10,8 @@
  */
 
 import { NextResponse } from 'next/server';
-import { getBadgeState, generateBadgeSvg } from '../../../../../../tools/badge/badge.js';
-import type { BadgeDeps, BadgeSnapshot } from '../../../../../../tools/badge/badge.js';
+import { getBadgeState, generateBadgeSvg } from '@tools/badge/badge.js';
+import type { BadgeDeps, BadgeSnapshot } from '@tools/badge/badge.js';
 import { createServerClient } from '../../../../lib/supabase.js';
 import { calculateHealthScore } from '../../../../lib/scoring.js';
 

@@ -5,7 +5,7 @@
  * Never throws.
  */
 
-import type { FixExplanation, FixExplanationCategory } from '../../../tools/explanations/fix_explanation_registry.js';
+import type { FixExplanation, FixExplanationCategory } from '@tools/explanations/fix_explanation_registry.js';
 
 // ── Category badge config ────────────────────────────────────────────────────
 

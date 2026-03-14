@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
-import { createCheckoutSession } from '../../../../../../../tools/billing/stripe_client.js';
+import { createCheckoutSession } from '@tools/billing/stripe_client.js';
 
 const HARDCODED_TENANT = '00000000-0000-0000-0000-000000000001';
 

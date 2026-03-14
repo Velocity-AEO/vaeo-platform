@@ -6,7 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { upgradeAgencyPlan, type AgencyPlan } from '../../../../../../tools/agency/agency_account.js';
+import { upgradeAgencyPlan, type AgencyPlan } from '@tools/agency/agency_account.js';
 
 interface RouteContext {
   params: Promise<{ agencyId: string }>;

@@ -5,8 +5,8 @@ import {
   type ReportDeps,
   type LighthouseSnapshot,
   type GSCPageSummary,
-} from '../../../../../../tools/reports/report_aggregator.js';
-import type { Grade } from '../../../../../../tools/scoring/health_score.js';
+} from '@tools/reports/report_aggregator.js';
+import type { Grade } from '@tools/scoring/health_score.js';
 
 // ── Real deps ────────────────────────────────────────────────────────────────
 

@@ -1,7 +1,7 @@
 'use client';
 
-import type { ScoreBreakdownEntry } from '../../../tools/scoring/health_score.js';
-import type { IssueSeverity } from '../../../tools/health/health_score_weights.js';
+import type { ScoreBreakdownEntry } from '@tools/scoring/health_score.js';
+import type { IssueSeverity } from '@tools/health/health_score_weights.js';
 import {
   formatIssueTypeLabel,
   getSeverityBadgeColor,

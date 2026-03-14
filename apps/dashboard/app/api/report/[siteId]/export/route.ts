@@ -4,8 +4,8 @@ import {
   generateSiteReport,
   type ReportDeps,
   type GSCPageSummary,
-} from '../../../../../../../tools/reports/report_aggregator.js';
-import type { Grade } from '../../../../../../../tools/scoring/health_score.js';
+} from '@tools/reports/report_aggregator.js';
+import type { Grade } from '@tools/scoring/health_score.js';
 
 // Re-use the same deps builder from the parent route.
 // In a real app these would be shared, but keeping it self-contained

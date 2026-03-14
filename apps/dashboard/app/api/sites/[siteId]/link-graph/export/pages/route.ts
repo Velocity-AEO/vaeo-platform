@@ -6,9 +6,9 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { exportPageNodes } from '../../../../../../../../tools/link_graph/link_graph_exporter.js';
-import type { PageNode } from '../../../../../../../../tools/link_graph/link_graph_types.js';
-import type { AuthorityScore } from '../../../../../../../../tools/link_graph/authority_scorer.js';
+import { exportPageNodes } from '@tools/link_graph/link_graph_exporter.js';
+import type { PageNode } from '@tools/link_graph/link_graph_types.js';
+import type { AuthorityScore } from '@tools/link_graph/authority_scorer.js';
 
 type Ctx = { params: Promise<{ siteId: string }> };
 

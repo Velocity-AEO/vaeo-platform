@@ -5,7 +5,7 @@ import {
   calculateMonthlySavings,
   generateROIStatement,
   type KnownApp,
-} from '../../../../../../../tools/apps/known_seo_apps.js';
+} from '@tools/apps/known_seo_apps.js';
 
 /**
  * GET /api/apps/roi?site_id=xxx

@@ -6,8 +6,8 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { exportVelocityTrends } from '../../../../../../../../../tools/link_graph/link_graph_exporter.js';
-import type { LinkVelocityTrend } from '../../../../../../../../../tools/link_graph/link_velocity_tracker.js';
+import { exportVelocityTrends } from '@tools/link_graph/link_graph_exporter.js';
+import type { LinkVelocityTrend } from '@tools/link_graph/link_velocity_tracker.js';
 
 type Ctx = { params: Promise<{ siteId: string }> };
 

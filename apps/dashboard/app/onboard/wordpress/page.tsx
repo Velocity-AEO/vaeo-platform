@@ -7,7 +7,7 @@ import {
   loadOnboardingState,
   clearOnboardingState,
   getResumeStep,
-} from '../../../tools/onboarding/onboarding_state_store';
+} from '@tools/onboarding/onboarding_state_store';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

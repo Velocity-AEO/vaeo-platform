@@ -9,8 +9,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
-import { handleMcpRequest, type McpRequest } from '../../../../../tools/mcp/mcp_server.js';
-import { checkRateLimit, createInMemoryStore } from '../../../../../tools/security/rate_limiter.js';
+import { handleMcpRequest, type McpRequest } from '@tools/mcp/mcp_server.js';
+import { checkRateLimit, createInMemoryStore } from '@tools/security/rate_limiter.js';
 
 // In-memory rate limiter (per-process; for multi-instance use Redis store)
 const _store = createInMemoryStore();

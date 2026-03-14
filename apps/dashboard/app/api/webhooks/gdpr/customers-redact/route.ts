@@ -5,7 +5,7 @@ import {
   verifyShopifyWebhookHmac,
   type GdprWebhookPayload,
   type GdprDeps,
-} from '../../../../../../../../tools/shopify/gdpr_webhooks.js';
+} from '@tools/shopify/gdpr_webhooks.js';
 
 function buildDeps(): GdprDeps {
   const db = createServerClient();

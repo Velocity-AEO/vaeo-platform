@@ -5,7 +5,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { buildAgencyAccount, type AgencyPlan } from '../../../../../tools/agency/agency_account.js';
+import { buildAgencyAccount, type AgencyPlan } from '@tools/agency/agency_account.js';
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
   try {

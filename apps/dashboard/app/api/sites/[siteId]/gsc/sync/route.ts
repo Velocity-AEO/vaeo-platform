@@ -10,8 +10,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   triggerFullSync,
   runSyncForSite,
-} from '../../../../../../../tools/gsc/gsc_sync_scheduler.js';
-import type { DeltaSyncResult } from '../../../../../../../tools/gsc/gsc_delta_sync.js';
+} from '@tools/gsc/gsc_sync_scheduler.js';
+import type { DeltaSyncResult } from '@tools/gsc/gsc_delta_sync.js';
 
 type Ctx = { params: Promise<{ siteId: string }> };
 

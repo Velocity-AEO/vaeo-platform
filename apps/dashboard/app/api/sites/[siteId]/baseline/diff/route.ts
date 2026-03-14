@@ -8,7 +8,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { diffBaselines, calculateBaselineSeverity } from '../../../../../../../../tools/sandbox/baseline_snapshot.js';
+import { diffBaselines, calculateBaselineSeverity } from '@tools/sandbox/baseline_snapshot.js';
 
 type Ctx = { params: Promise<{ siteId: string }> };
 

@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { deployEmailCapture } from '../../../../../../../tools/native/email_capture_orchestrator.js';
-import { defaultEmailCaptureConfig } from '../../../../../../../tools/native/email_capture.js';
+import { deployEmailCapture } from '@tools/native/email_capture_orchestrator.js';
+import { defaultEmailCaptureConfig } from '@tools/native/email_capture.js';
 
 // ── GET — return mock active email capture component ────────────────────────
 

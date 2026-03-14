@@ -5,7 +5,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { loadSiteDiagnostics } from '../../../../../../../../../tools/sandbox/sandbox_diagnostics.js';
+import { loadSiteDiagnostics } from '@tools/sandbox/sandbox_diagnostics.js';
 
 interface RouteContext {
   params: Promise<{ siteId: string }>;

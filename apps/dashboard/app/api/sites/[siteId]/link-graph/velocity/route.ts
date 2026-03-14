@@ -5,7 +5,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getSiteVelocitySummary } from '../../../../../../../../../tools/link_graph/link_velocity_tracker.js';
+import { getSiteVelocitySummary } from '@tools/link_graph/link_velocity_tracker.js';
 
 interface RouteContext {
   params: Promise<{ siteId: string }>;

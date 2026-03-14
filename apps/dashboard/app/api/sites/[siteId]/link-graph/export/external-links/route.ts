@@ -6,9 +6,9 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { exportExternalLinks } from '../../../../../../../../../tools/link_graph/link_graph_exporter.js';
-import type { ExternalLink } from '../../../../../../../../../tools/link_graph/link_graph_types.js';
-import type { ExternalLinkCheckResult } from '../../../../../../../../../tools/link_graph/external_link_checker.js';
+import { exportExternalLinks } from '@tools/link_graph/link_graph_exporter.js';
+import type { ExternalLink } from '@tools/link_graph/link_graph_types.js';
+import type { ExternalLinkCheckResult } from '@tools/link_graph/external_link_checker.js';
 
 type Ctx = { params: Promise<{ siteId: string }> };
 

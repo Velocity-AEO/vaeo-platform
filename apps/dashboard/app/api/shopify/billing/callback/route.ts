@@ -7,7 +7,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { getShopifySubscription } from '../../../../../../../tools/shopify/billing/shopify_billing.js';
+import { getShopifySubscription } from '@tools/shopify/billing/shopify_billing.js';
 
 const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL ?? 'https://app.velocityaeo.com';
 

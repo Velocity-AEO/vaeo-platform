@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
-import { getApprovedSpecs, SPEC_LIBRARY } from '../../../../../../tools/native/spec_library.js';
+import { getApprovedSpecs, SPEC_LIBRARY } from '@tools/native/spec_library.js';
 import {
   COMPONENT_REGISTRY,
   getLiveComponents,
-} from '../../../../../../tools/native/component_registry.js';
+} from '@tools/native/component_registry.js';
 import {
   APP_FINGERPRINT_CATALOG,
-} from '../../../../../../tools/apps/app_fingerprint_catalog.js';
+} from '@tools/apps/app_fingerprint_catalog.js';
 
 /**
  * GET /api/native

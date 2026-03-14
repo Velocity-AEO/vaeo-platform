@@ -6,7 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { loadOnboardingProgress } from '../../../../../../../../tools/onboarding/onboarding_progress.js';
+import { loadOnboardingProgress } from '@tools/onboarding/onboarding_progress.js';
 
 interface RouteContext {
   params: Promise<{ siteId: string }>;
