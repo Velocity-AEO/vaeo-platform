@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { buildSiteContext } from '@/../tools/chatbot/context_builder';
-import { buildMessage, buildSession } from '@/../tools/chatbot/message';
-import { runChatEngine, buildQuickReplies } from '@/../tools/chatbot/chat_engine';
-import type { ChatMessage } from '@/../tools/chatbot/message';
+import { buildSiteContext } from '@tools/chatbot/context_builder';
+import { buildMessage, buildSession } from '@tools/chatbot/message';
+import { runChatEngine, buildQuickReplies } from '@tools/chatbot/chat_engine';
+import type { ChatMessage } from '@tools/chatbot/message';
 
 export async function POST(
   req: NextRequest,

@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { deployShippingBar, removeShippingBar } from '@/../tools/native/shipping_bar_orchestrator';
-import { defaultShippingBarConfig } from '@/../tools/native/shipping_bar';
-import { createComponent, updateComponentStatus } from '@/../tools/native/native_component';
-import type { ShippingBarConfig } from '@/../tools/native/shipping_bar';
+import { deployShippingBar, removeShippingBar } from '@tools/native/shipping_bar_orchestrator';
+import { defaultShippingBarConfig } from '@tools/native/shipping_bar';
+import { createComponent, updateComponentStatus } from '@tools/native/native_component';
+import type { ShippingBarConfig } from '@tools/native/shipping_bar';
 
 const mockDeps = {
   writeSnippet: async () => ({ success: true }),

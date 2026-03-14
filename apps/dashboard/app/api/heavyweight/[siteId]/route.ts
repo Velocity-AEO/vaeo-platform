@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import type { HeavyweightRun } from '@/../tools/heavyweight/case_study_generator';
-import type { PerformanceAnalysis, AppImpactAnalysis } from '@/../tools/heavyweight/performance_analyzer';
-import type { RegressionCheckResult } from '@/../tools/heavyweight/regression_guard';
+import type { HeavyweightRun } from '@tools/heavyweight/case_study_generator';
+import type { PerformanceAnalysis, AppImpactAnalysis } from '@tools/heavyweight/performance_analyzer';
+import type { RegressionCheckResult } from '@tools/heavyweight/regression_guard';
 
 // Mock data for demo — replace with DB lookup in production
 function getMockRun(siteId: string): HeavyweightRun & {

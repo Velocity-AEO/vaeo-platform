@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { simulateRankings, simulateRankingHistory } from '@/../tools/rankings/ranking_simulator';
+import { simulateRankings, simulateRankingHistory } from '@tools/rankings/ranking_simulator';
 
 export async function GET(
   req: NextRequest,

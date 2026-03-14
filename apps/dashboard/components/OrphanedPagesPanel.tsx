@@ -8,7 +8,7 @@
  */
 
 import { useEffect, useState, useCallback } from 'react';
-import type { OrphanedPageIssue } from '@/../tools/orphaned/orphaned_page_issue_builder';
+import type { OrphanedPageIssue } from '@tools/orphaned/orphaned_page_issue_builder';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

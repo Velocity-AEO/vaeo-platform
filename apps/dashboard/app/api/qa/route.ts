@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { runQASuite, runQAForSite } from '@/../tools/qa/qa_runner';
+import { runQASuite, runQAForSite } from '@tools/qa/qa_runner';
 
 export async function GET() {
   const report = await runQASuite();

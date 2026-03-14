@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { generateCaseStudy } from '@/../tools/heavyweight/case_study_generator';
-import { formatCaseStudyAsMarkdown } from '@/../tools/heavyweight/case_study_storage';
-import type { CaseStudyInput, HeavyweightRun } from '@/../tools/heavyweight/case_study_generator';
-import type { PerformanceAnalysis } from '@/../tools/heavyweight/performance_analyzer';
-import type { FixValidationResult } from '@/../tools/heavyweight/fix_validator';
+import { generateCaseStudy } from '@tools/heavyweight/case_study_generator';
+import { formatCaseStudyAsMarkdown } from '@tools/heavyweight/case_study_storage';
+import type { CaseStudyInput, HeavyweightRun } from '@tools/heavyweight/case_study_generator';
+import type { PerformanceAnalysis } from '@tools/heavyweight/performance_analyzer';
+import type { FixValidationResult } from '@tools/heavyweight/fix_validator';
 
 // Mock data for demo — replace with DB lookup in production
 function getMockRun(siteId: string): HeavyweightRun {

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { runHealthMonitor, defaultMonitorConfig } from '@/../tools/health/health_monitor';
-import type { HealthCheckResult } from '@/../tools/health/health_check';
+import { runHealthMonitor, defaultMonitorConfig } from '@tools/health/health_monitor';
+import type { HealthCheckResult } from '@tools/health/health_check';
 
 // ── Mock deps ─────────────────────────────────────────────────────────────────
 
@@ -34,7 +34,7 @@ export async function GET() {
     const { report, notifications } = await runHealthMonitor(cfg, {
       runAllChecks:      async () => mockChecks(),
       sendNotifications: async (r, c) => {
-        const { sendNotifications } = await import('@/../tools/health/notification_engine');
+        const { sendNotifications } = await import('@tools/health/notification_engine');
         return sendNotifications(r, c, {
           logNotification: async () => { /* no-op in demo */ },
         });
@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
     const { report, notifications } = await runHealthMonitor(cfg, {
       runAllChecks:      async () => mockChecks(),
       sendNotifications: async (r, c) => {
-        const { sendNotifications } = await import('@/../tools/health/notification_engine');
+        const { sendNotifications } = await import('@tools/health/notification_engine');
         return sendNotifications(r, c, {
           logNotification: async () => { /* no-op in demo */ },
         });

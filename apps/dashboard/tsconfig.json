@@ -19,6 +19,7 @@
     ],
     "paths": {
       "@/*": ["./*"],
+      "@tools/*": ["../../tools/*"],
       "@vaeo/scoring": ["../../packages/scoring/src/index.ts"]
     }
   },

@@ -5,9 +5,9 @@ import { useParams, useRouter } from 'next/navigation';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts';
-import type { SiteStats } from '@/../tools/stats/site_stats';
-import type { RankingSnapshot, RankingEntry } from '@/../tools/rankings/ranking_entry';
-import type { FixHistoryPage, FixHistoryEntry } from '@/../tools/stats/fix_history';
+import type { SiteStats } from '@tools/stats/site_stats';
+import type { RankingSnapshot, RankingEntry } from '@tools/rankings/ranking_entry';
+import type { FixHistoryPage, FixHistoryEntry } from '@tools/stats/fix_history';
 import POVDisclaimer from '@/components/POVDisclaimer';
 import SimulatedDataBanner from '@/components/SimulatedDataBanner';
 import RankingsTrendPanel from '@/components/RankingsTrendPanel';
@@ -18,7 +18,7 @@ import AEOScoreCard from '@/components/AEOScoreCard';
 import SandboxHealthPanel from '@/components/SandboxHealthPanel';
 import LighthouseTrendPanel from '@/components/LighthouseTrendPanel';
 import OnboardingProgressTracker from '@/components/OnboardingProgressTracker';
-import { calculateProgress, SHOPIFY_ONBOARDING_STEPS } from '@/../tools/onboarding/onboarding_progress';
+import { calculateProgress, SHOPIFY_ONBOARDING_STEPS } from '@tools/onboarding/onboarding_progress';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

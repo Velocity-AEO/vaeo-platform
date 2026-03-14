@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { buildSiteStats } from '@/../tools/stats/site_stats';
-import { simulateRankings } from '@/../tools/rankings/ranking_simulator';
-import { simulateFixHistory } from '@/../tools/stats/fix_history';
+import { buildSiteStats } from '@tools/stats/site_stats';
+import { simulateRankings } from '@tools/rankings/ranking_simulator';
+import { simulateFixHistory } from '@tools/stats/fix_history';
 
 export async function GET(
   _req: NextRequest,

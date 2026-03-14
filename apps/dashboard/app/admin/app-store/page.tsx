@@ -12,7 +12,7 @@ import {
   APP_LISTING_REQUIREMENTS,
   getSubmissionReadiness,
   type AppListingRequirement,
-} from '@/../tools/shopify/app_listing/app_listing_checklist';
+} from '@tools/shopify/app_listing/app_listing_checklist';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
