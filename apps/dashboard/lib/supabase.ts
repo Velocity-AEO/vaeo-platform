@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 
-const url     = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const url     = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? '';
+const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
 
 // Private service role key — available server-side via doppler, never sent to browser.
 // Falls back to anon key in environments where SERVICE_ROLE_KEY is not set.
