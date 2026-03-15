@@ -143,8 +143,12 @@ const realWriteQueue: AuditCommandOps['writeQueue'] = async (rows) => {
   const { getConfig }    = await import('../../core/config.js');
   const cfg = getConfig();
   const db  = createClient(cfg.supabaseUrl, cfg.supabaseServiceKey);
-  const { error } = await db.from('action_queue').insert(rows);
-  if (error) throw new Error(`action_queue insert failed: ${error.message}`);
+  // Use upsert with ignoreDuplicates=true: insert new rows as 'queued' but
+  // leave existing rows (approved/deployed/failed) untouched on conflict.
+  const { error } = await db
+    .from('action_queue')
+    .upsert(rows, { onConflict: 'site_id,url,issue_type', ignoreDuplicates: true });
+  if (error) throw new Error(`action_queue upsert failed: ${error.message}`);
   return rows.length;
 };
 
