@@ -1,3 +1,4 @@
+// v2 - compiled worker
 /**
  * POST /api/sites/[siteId]/crawl
  *
