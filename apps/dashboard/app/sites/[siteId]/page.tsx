@@ -31,7 +31,8 @@ interface Fix {
 type ActionState  = Record<string, 'idle' | 'loading' | 'done'>;
 type RunState     = 'idle' | 'loading' | 'done' | 'error';
 
-interface RunResult { applied: number; failed: number; skipped: number }
+interface RunResult   { applied: number; failed: number; skipped: number }
+interface CrawlResult { urls_crawled: number; issues_found: number; issues_written: number }
 
 // ── Grade badge ──────────────────────────────────────────────────────────────
 
@@ -114,10 +115,13 @@ export default function SiteDetailPage() {
   const [fixes, setFixes] = useState<Fix[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [actionState, setActionState] = useState<ActionState>({});
-  const [runState,    setRunState]    = useState<RunState>('idle');
-  const [runResult,   setRunResult]   = useState<RunResult | null>(null);
-  const [runError,    setRunError]    = useState('');
+  const [actionState,  setActionState]  = useState<ActionState>({});
+  const [runState,     setRunState]     = useState<RunState>('idle');
+  const [runResult,    setRunResult]    = useState<RunResult | null>(null);
+  const [runError,     setRunError]     = useState('');
+  const [crawlState,   setCrawlState]   = useState<RunState>('idle');
+  const [crawlResult,  setCrawlResult]  = useState<CrawlResult | null>(null);
+  const [crawlError,   setCrawlError]   = useState('');
 
   const loadData = useCallback(async () => {
     try {
@@ -158,6 +162,24 @@ export default function SiteDetailPage() {
     } catch (err) {
       setRunError(err instanceof Error ? err.message : String(err));
       setRunState('error');
+    }
+  }
+
+  async function handleCrawl() {
+    setCrawlState('loading');
+    setCrawlResult(null);
+    setCrawlError('');
+    try {
+      const res = await fetch(`/api/sites/${siteId}/crawl`, { method: 'POST' });
+      const data = await res.json() as CrawlResult & { error?: string };
+      if (!res.ok) throw new Error(data.error ?? `Crawl failed (${res.status})`);
+      setCrawlResult({ urls_crawled: data.urls_crawled, issues_found: data.issues_found, issues_written: data.issues_written });
+      setCrawlState('done');
+      // Refresh fixes list after crawl so newly discovered issues appear.
+      setTimeout(() => loadData(), 800);
+    } catch (err) {
+      setCrawlError(err instanceof Error ? err.message : String(err));
+      setCrawlState('error');
     }
   }
 
@@ -211,23 +233,48 @@ export default function SiteDetailPage() {
           <h1 className="text-xl font-semibold text-slate-900">{health.site_url}</h1>
           <p className="text-xs text-slate-400 mt-0.5 uppercase">{health.cms_type}</p>
         </div>
-        <button
-          onClick={handleRun}
-          disabled={runState === 'loading'}
-          className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
-        >
-          {runState === 'loading' ? (
-            <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
-              <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity="0.25" />
-              <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-            </svg>
-          ) : (
-            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polygon points="5 3 19 12 5 21 5 3" />
-            </svg>
-          )}
-          {runState === 'loading' ? 'Running...' : 'Run Pipeline'}
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Run Crawl — discover new issues */}
+          <button
+            onClick={handleCrawl}
+            disabled={crawlState === 'loading' || runState === 'loading'}
+            className="inline-flex items-center gap-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+          >
+            {crawlState === 'loading' ? (
+              <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity="0.25" />
+                <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+              </svg>
+            ) : (
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 12a9 9 0 0 1-9 9" />
+                <path d="M3 12a9 9 0 0 1 9-9" />
+                <path d="M21 3v4h-4" />
+                <path d="M3 21v-4h4" />
+              </svg>
+            )}
+            {crawlState === 'loading' ? 'Crawling...' : 'Run Crawl'}
+          </button>
+
+          {/* Run Pipeline — apply already-approved fixes */}
+          <button
+            onClick={handleRun}
+            disabled={runState === 'loading' || crawlState === 'loading'}
+            className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+          >
+            {runState === 'loading' ? (
+              <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity="0.25" />
+                <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+              </svg>
+            ) : (
+              <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="5 3 19 12 5 21 5 3" />
+              </svg>
+            )}
+            {runState === 'loading' ? 'Running...' : 'Run Pipeline'}
+          </button>
+        </div>
       </div>
 
       {/* Run result banner */}
@@ -245,6 +292,26 @@ export default function SiteDetailPage() {
         <div className="mb-5 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 flex items-center justify-between">
           <span>Run failed: {runError}</span>
           <button onClick={() => setRunState('idle')} className="text-red-400 hover:text-red-600 text-xs ml-4">Dismiss</button>
+        </div>
+      )}
+
+      {/* Crawl result banners */}
+      {crawlState === 'done' && crawlResult && (
+        <div className="mb-5 rounded-lg bg-sky-50 border border-sky-200 px-4 py-3 text-sm text-sky-800 flex items-center justify-between">
+          <span>
+            Crawl complete — <strong>{crawlResult.urls_crawled}</strong> URLs crawled,{' '}
+            <strong>{crawlResult.issues_written}</strong> new issues queued
+            {crawlResult.issues_found !== crawlResult.issues_written && (
+              <> ({crawlResult.issues_found} detected, {crawlResult.issues_found - crawlResult.issues_written} already tracked)</>
+            )}
+          </span>
+          <button onClick={() => setCrawlState('idle')} className="text-sky-500 hover:text-sky-700 text-xs ml-4">Dismiss</button>
+        </div>
+      )}
+      {crawlState === 'error' && (
+        <div className="mb-5 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 flex items-center justify-between">
+          <span>Crawl failed: {crawlError}</span>
+          <button onClick={() => setCrawlState('idle')} className="text-red-400 hover:text-red-600 text-xs ml-4">Dismiss</button>
         </div>
       )}
 

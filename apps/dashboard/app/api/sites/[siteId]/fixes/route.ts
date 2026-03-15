@@ -10,7 +10,7 @@ function buildDeps(): FixesDeps {
         .from('action_queue')
         .select('id, url, issue_type, proposed_fix, execution_status, priority, risk_score')
         .eq('site_id', siteId)
-        .in('execution_status', ['pending_approval', 'approved', 'completed'])
+        .in('execution_status', ['queued', 'pending_approval', 'approved', 'completed'])
         .order('priority', { ascending: true });
       if (error) throw new Error(error.message);
       return data ?? [];
