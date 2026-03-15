@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { createServerClient } from '@/lib/supabase';
 
 // Statuses that the command-center UI is allowed to set via this generic PATCH.
 // 'approved' is intentionally excluded — only the dashboard UI approval action
@@ -31,9 +31,7 @@ export async function PATCH(
     );
   }
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? '';
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
-  const db = createClient(url, key);
+  const db = createServerClient();
 
   const { error } = await db
     .from('action_queue')
