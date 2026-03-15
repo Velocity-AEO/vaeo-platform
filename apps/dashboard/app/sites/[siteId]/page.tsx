@@ -28,7 +28,10 @@ interface Fix {
   created_at:        string;
 }
 
-type ActionState = Record<string, 'idle' | 'loading' | 'done'>;
+type ActionState  = Record<string, 'idle' | 'loading' | 'done'>;
+type RunState     = 'idle' | 'loading' | 'done' | 'error';
+
+interface RunResult { applied: number; failed: number; skipped: number }
 
 // ── Grade badge ──────────────────────────────────────────────────────────────
 
@@ -112,6 +115,9 @@ export default function SiteDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [actionState, setActionState] = useState<ActionState>({});
+  const [runState,    setRunState]    = useState<RunState>('idle');
+  const [runResult,   setRunResult]   = useState<RunResult | null>(null);
+  const [runError,    setRunError]    = useState('');
 
   const loadData = useCallback(async () => {
     try {
@@ -136,6 +142,24 @@ export default function SiteDetailPage() {
   }, [siteId]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  async function handleRun() {
+    setRunState('loading');
+    setRunResult(null);
+    setRunError('');
+    try {
+      const res = await fetch(`/api/sites/${siteId}/run`, { method: 'POST' });
+      const data = await res.json() as RunResult & { error?: string };
+      if (!res.ok) throw new Error(data.error ?? `Run failed (${res.status})`);
+      setRunResult({ applied: data.applied, failed: data.failed, skipped: data.skipped });
+      setRunState('done');
+      // Refresh fixes list after a successful run
+      if (data.applied > 0) setTimeout(() => loadData(), 800);
+    } catch (err) {
+      setRunError(err instanceof Error ? err.message : String(err));
+      setRunState('error');
+    }
+  }
 
   async function handleAction(fixId: string, action: 'approve' | 'skip') {
     setActionState((prev) => ({ ...prev, [fixId]: 'loading' }));
@@ -182,12 +206,47 @@ export default function SiteDetailPage() {
       </div>
 
       {/* Header */}
-      <div className="flex items-start justify-between mb-8">
+      <div className="flex items-start justify-between mb-6">
         <div>
           <h1 className="text-xl font-semibold text-slate-900">{health.site_url}</h1>
           <p className="text-xs text-slate-400 mt-0.5 uppercase">{health.cms_type}</p>
         </div>
+        <button
+          onClick={handleRun}
+          disabled={runState === 'loading'}
+          className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+        >
+          {runState === 'loading' ? (
+            <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+              <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeOpacity="0.25" />
+              <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+            </svg>
+          ) : (
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polygon points="5 3 19 12 5 21 5 3" />
+            </svg>
+          )}
+          {runState === 'loading' ? 'Running...' : 'Run Pipeline'}
+        </button>
       </div>
+
+      {/* Run result banner */}
+      {runState === 'done' && runResult && (
+        <div className="mb-5 rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 text-sm text-emerald-800 flex items-center justify-between">
+          <span>
+            Pipeline complete — <strong>{runResult.applied}</strong> applied
+            {runResult.failed > 0 && <>, <strong className="text-red-600">{runResult.failed}</strong> failed</>}
+            {runResult.skipped > 0 && <>, {runResult.skipped} skipped</>}
+          </span>
+          <button onClick={() => setRunState('idle')} className="text-emerald-500 hover:text-emerald-700 text-xs ml-4">Dismiss</button>
+        </div>
+      )}
+      {runState === 'error' && (
+        <div className="mb-5 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-700 flex items-center justify-between">
+          <span>Run failed: {runError}</span>
+          <button onClick={() => setRunState('idle')} className="text-red-400 hover:text-red-600 text-xs ml-4">Dismiss</button>
+        </div>
+      )}
 
       {/* Health score card */}
       <div className="bg-white border border-slate-200 rounded-xl p-6 mb-6">
