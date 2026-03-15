@@ -31,7 +31,6 @@ function makeAction(overrides: Partial<ActionQueueRow> = {}): ActionQueueRow {
     execution_status: 'pending_approval',
     priority:         5,
     risk_score:       3,
-    reasoning_block:  { detected: { issue: 'Missing title' }, risk_score: 3 },
     ...overrides,
   };
 }
@@ -143,17 +142,9 @@ describe('getFixes — happy path', () => {
     assert.equal(result.fixes[2].status, 'completed');
   });
 
-  it('includes reasoning_block', async () => {
-    const rb = { detected: { issue: 'Missing title' }, risk_score: 3 };
+  it('reasoning_block is always null (column removed from DB)', async () => {
     const result = await getFixes(SITE_ID, happyDeps({
-      loadActions: async () => [makeAction({ reasoning_block: rb })],
-    }));
-    assert.deepEqual(result.fixes[0].reasoning_block, rb);
-  });
-
-  it('handles null reasoning_block', async () => {
-    const result = await getFixes(SITE_ID, happyDeps({
-      loadActions: async () => [makeAction({ reasoning_block: null })],
+      loadActions: async () => [makeAction()],
     }));
     assert.equal(result.fixes[0].reasoning_block, null);
   });

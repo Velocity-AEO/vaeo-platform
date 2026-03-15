@@ -16,7 +16,6 @@ export interface ActionQueueRow {
   execution_status: string;
   priority:         number;
   risk_score:       number;
-  reasoning_block:  Record<string, unknown> | null;
 }
 
 export interface SnapshotRow {
@@ -107,7 +106,7 @@ export async function getFixes(siteId: string, deps: FixesDeps): Promise<GetFixe
         proposed_value:  extractProposedValue(action.proposed_fix),
         confidence:      extractConfidence(action.proposed_fix),
         status:          action.execution_status,
-        reasoning_block: action.reasoning_block,
+        reasoning_block: null,
       };
       // Include raw proposed_fix for SCHEMA_ issues so UI can show JSON-LD
       if (action.issue_type.startsWith('SCHEMA_')) {

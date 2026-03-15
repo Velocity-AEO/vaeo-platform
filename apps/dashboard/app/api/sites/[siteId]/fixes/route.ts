@@ -8,7 +8,7 @@ function buildDeps(): FixesDeps {
     loadActions: async (siteId) => {
       const { data, error } = await db
         .from('action_queue')
-        .select('id, url, issue_type, proposed_fix, execution_status, priority, risk_score, reasoning_block')
+        .select('id, url, issue_type, proposed_fix, execution_status, priority, risk_score')
         .eq('site_id', siteId)
         .in('execution_status', ['pending_approval', 'approved', 'completed'])
         .order('priority', { ascending: true });
