@@ -39,7 +39,7 @@ function makeAction(overrides: Partial<ActionQueueRow> = {}): ActionQueueRow {
 function makeSnapshot(overrides: Partial<SnapshotRow> = {}): SnapshotRow {
   return {
     url:           'https://example.com/products/hat-1',
-    field_type:    'title',
+    field_name:    'title',
     current_value: 'Old Title',
     ...overrides,
   };
@@ -50,7 +50,7 @@ function happyDeps(overrides: Partial<FixesDeps> = {}): FixesDeps {
     loadActions:   async () => [makeAction(), makeAction({ issue_type: 'meta_missing', proposed_fix: { new_description: 'Shop hats', confidence_score: 0.82 } })],
     loadSnapshots: async () => [
       makeSnapshot(),
-      makeSnapshot({ url: 'https://example.com/products/hat-2', field_type: 'meta_description', current_value: null }),
+      makeSnapshot({ url: 'https://example.com/products/hat-2', field_name: 'meta_description', current_value: null }),
     ],
     updateStatus:  async () => {},
     ...overrides,
@@ -162,9 +162,9 @@ describe('getFixes — happy path', () => {
 // ── getFixes — current_value matching ─────────────────────────────────────────
 
 describe('getFixes — current_value from snapshots', () => {
-  it('matches snapshot by url + field_type derived from issue_type', async () => {
+  it('matches snapshot by url + field_name derived from issue_type', async () => {
     const action = makeAction({ url: 'https://example.com/page', issue_type: 'title_missing' });
-    const snap = makeSnapshot({ url: 'https://example.com/page', field_type: 'title', current_value: 'Old Title' });
+    const snap = makeSnapshot({ url: 'https://example.com/page', field_name: 'title', current_value: 'Old Title' });
     const result = await getFixes(SITE_ID, happyDeps({
       loadActions:   async () => [action],
       loadSnapshots: async () => [snap],
@@ -181,9 +181,9 @@ describe('getFixes — current_value from snapshots', () => {
     assert.equal(result.fixes[0].current_value, null);
   });
 
-  it('maps meta_missing to meta_description field_type', async () => {
+  it('maps meta_missing to meta_description field_name', async () => {
     const action = makeAction({ url: 'https://example.com/page', issue_type: 'meta_missing' });
-    const snap = makeSnapshot({ url: 'https://example.com/page', field_type: 'meta_description', current_value: 'Old desc' });
+    const snap = makeSnapshot({ url: 'https://example.com/page', field_name: 'meta_description', current_value: 'Old desc' });
     const result = await getFixes(SITE_ID, happyDeps({
       loadActions:   async () => [action],
       loadSnapshots: async () => [snap],
@@ -191,9 +191,9 @@ describe('getFixes — current_value from snapshots', () => {
     assert.equal(result.fixes[0].current_value, 'Old desc');
   });
 
-  it('maps META_TITLE_MISSING to title field_type', async () => {
+  it('maps META_TITLE_MISSING to title field_name', async () => {
     const action = makeAction({ url: 'https://example.com/page', issue_type: 'META_TITLE_MISSING' });
-    const snap = makeSnapshot({ url: 'https://example.com/page', field_type: 'title', current_value: 'Current Title' });
+    const snap = makeSnapshot({ url: 'https://example.com/page', field_name: 'title', current_value: 'Current Title' });
     const result = await getFixes(SITE_ID, happyDeps({
       loadActions:   async () => [action],
       loadSnapshots: async () => [snap],
@@ -201,9 +201,9 @@ describe('getFixes — current_value from snapshots', () => {
     assert.equal(result.fixes[0].current_value, 'Current Title');
   });
 
-  it('maps h1_missing to h1 field_type', async () => {
+  it('maps h1_missing to h1 field_name', async () => {
     const action = makeAction({ url: 'https://example.com/page', issue_type: 'h1_missing' });
-    const snap = makeSnapshot({ url: 'https://example.com/page', field_type: 'h1', current_value: 'Old H1' });
+    const snap = makeSnapshot({ url: 'https://example.com/page', field_name: 'h1', current_value: 'Old H1' });
     const result = await getFixes(SITE_ID, happyDeps({
       loadActions:   async () => [action],
       loadSnapshots: async () => [snap],
@@ -211,9 +211,9 @@ describe('getFixes — current_value from snapshots', () => {
     assert.equal(result.fixes[0].current_value, 'Old H1');
   });
 
-  it('maps canonical_missing to canonical field_type', async () => {
+  it('maps canonical_missing to canonical field_name', async () => {
     const action = makeAction({ url: 'https://example.com/page', issue_type: 'canonical_missing' });
-    const snap = makeSnapshot({ url: 'https://example.com/page', field_type: 'canonical', current_value: 'https://example.com/page' });
+    const snap = makeSnapshot({ url: 'https://example.com/page', field_name: 'canonical', current_value: 'https://example.com/page' });
     const result = await getFixes(SITE_ID, happyDeps({
       loadActions:   async () => [action],
       loadSnapshots: async () => [snap],
@@ -221,9 +221,9 @@ describe('getFixes — current_value from snapshots', () => {
     assert.equal(result.fixes[0].current_value, 'https://example.com/page');
   });
 
-  it('maps schema_missing to schema field_type', async () => {
+  it('maps schema_missing to schema field_name', async () => {
     const action = makeAction({ url: 'https://example.com/page', issue_type: 'schema_missing' });
-    const snap = makeSnapshot({ url: 'https://example.com/page', field_type: 'schema', current_value: '{}' });
+    const snap = makeSnapshot({ url: 'https://example.com/page', field_name: 'schema', current_value: '{}' });
     const result = await getFixes(SITE_ID, happyDeps({
       loadActions:   async () => [action],
       loadSnapshots: async () => [snap],

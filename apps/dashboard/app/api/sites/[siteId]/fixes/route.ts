@@ -18,7 +18,7 @@ function buildDeps(): FixesDeps {
     loadSnapshots: async (siteId) => {
       const { data, error } = await db
         .from('tracer_field_snapshots')
-        .select('url, field_type, current_value')
+        .select('url, field_name, current_value')
         .eq('site_id', siteId);
       if (error) throw new Error(error.message);
       return data ?? [];

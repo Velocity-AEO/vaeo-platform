@@ -21,7 +21,7 @@ export interface ActionQueueRow {
 
 export interface SnapshotRow {
   url:           string;
-  field_type:    string;
+  field_name:    string;
   current_value: string | null;
 }
 
@@ -96,7 +96,7 @@ export async function getFixes(siteId: string, deps: FixesDeps): Promise<GetFixe
     const fixes: FixItem[] = actions.map((action) => {
       const field = issueToField(action.issue_type);
       const snap = snapshots.find(
-        (s) => s.url === action.url && s.field_type === field,
+        (s) => s.url === action.url && s.field_name === field,
       );
 
       const item: FixItem = {
