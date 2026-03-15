@@ -15,6 +15,12 @@ const nextConfig = {
   experimental: {
     // Include files outside apps/dashboard in Vercel's output file tracing
     outputFileTracingRoot: repoRoot,
+    // Include the pre-compiled crawl worker in the crawl route's serverless
+    // bundle. The path is built dynamically at runtime (path.join(cwd,...))
+    // so Next.js's file tracer cannot detect it automatically.
+    outputFileTracingIncludes: {
+      '/api/sites/[siteId]/crawl': ['./scripts/dist/**'],
+    },
   },
   webpack(config) {
     // Allow .js imports to resolve .ts files (ESM convention used in tools/)

@@ -40,16 +40,14 @@ function runWorker(
   cmsType:  string,
 ): Promise<CrawlWorkerResult> {
   return new Promise((resolve, reject) => {
-    // process.cwd() is apps/dashboard/ when Next.js runs locally.
+    // process.cwd() is apps/dashboard/ when Next.js runs (local and Vercel).
+    // crawl-worker.mjs is pre-compiled at build time via `npm run build:worker`.
     const cwd    = process.cwd();
-    const worker = path.join(cwd, 'scripts', 'crawl-worker.ts');
-    // Use tsx/esm as the ESM loader — installed in apps/dashboard/node_modules.
-    const tsxEsm = path.join(cwd, 'node_modules', 'tsx', 'dist', 'esm', 'index.mjs');
+    const worker = path.join(cwd, 'scripts', 'dist', 'crawl-worker.mjs');
 
     const child = spawn(
       process.execPath,
-      ['--import', tsxEsm, worker,
-       '--site-id', siteId, '--tenant-id', tenantId, '--cms', cmsType],
+      [worker, '--site-id', siteId, '--tenant-id', tenantId, '--cms', cmsType],
       { cwd, env: process.env },
     );
 
