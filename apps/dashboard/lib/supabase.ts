@@ -1,17 +1,22 @@
 import { createClient } from '@supabase/supabase-js';
 
-const url     = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? '';
-const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
-
-// Private service role key — available server-side via doppler, never sent to browser.
-// Falls back to anon key in environments where SERVICE_ROLE_KEY is not set.
-const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? anonKey;
-
 // Browser / client-component singleton — anon key, safe to expose.
-export const supabase = createClient(url, anonKey);
+// Constants read at module-load time for the browser bundle.
+const browserUrl     = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? '';
+const browserAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
+export const supabase = createClient(browserUrl, browserAnonKey);
 
-// Server-side helper — uses service role key to bypass RLS.
-// Only call from server components, API routes, or server actions.
+/**
+ * Server-side Supabase client — always uses the service role key to bypass RLS.
+ *
+ * Env vars are read at call time (not module-load time) so the correct values
+ * are picked up regardless of when dotenv/doppler loads them.
+ *
+ * Only call from server components, API routes, or server actions — never
+ * expose this client to the browser.
+ */
 export function createServerClient() {
-  return createClient(url, serviceKey);
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? process.env.SUPABASE_URL ?? '';
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
+  return createClient(url, key);
 }
