@@ -85,24 +85,37 @@ const OWNER_RESOURCE: Record<SchemaWriteInput['resourceType'], string> = {
 };
 
 interface ShopifyMetafieldBody {
-  metafield?: { id: number; value: string };
+  metafield?: { id: number; value: string; namespace?: string; key?: string };
   /** Some Shopify stores return the plural array format even on POST/PUT. */
   metafields?: Array<{ id: number; value: string; namespace?: string; key?: string }>;
 }
 
-/** Extract metafield ID from a Shopify response that may use either singular or plural format. */
+/**
+ * Extract metafield ID from a Shopify response.
+ *
+ * - Singular `{ metafield: { id } }`: accepted when namespace/key are absent
+ *   (minimal API response); throws if they are present but don't match.
+ * - Plural `{ metafields: [...] }`: only matches by namespace + key — no fallback.
+ * - Returns null when ID cannot be found (triggers re-fetch path in writeSchema).
+ */
 function extractMetafieldId(body: ShopifyMetafieldBody, namespace: string, key: string): string | null {
   // Preferred: singular { metafield: { id } }
-  if (body.metafield?.id) return String(body.metafield.id);
-  // Fallback: plural { metafields: [...] } — find by namespace/key
+  if (body.metafield?.id) {
+    const { namespace: ns, key: k } = body.metafield;
+    if ((ns !== undefined && ns !== namespace) || (k !== undefined && k !== key)) {
+      throw new Error(
+        `Shopify returned metafield for wrong namespace/key: ` +
+        `expected ${namespace}/${key}, got ${ns ?? '?'}/${k ?? '?'}`,
+      );
+    }
+    return String(body.metafield.id);
+  }
+  // Fallback: plural { metafields: [...] } — must match by namespace/key exactly
   if (body.metafields) {
     const match = body.metafields.find(
       (m) => m.namespace === namespace && m.key === key,
     );
     if (match?.id) return String(match.id);
-    // Last resort: return the last metafield ID (most recently created)
-    const last = body.metafields[body.metafields.length - 1];
-    if (last?.id) return String(last.id);
   }
   return null;
 }

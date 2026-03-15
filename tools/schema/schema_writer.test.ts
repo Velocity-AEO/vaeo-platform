@@ -216,6 +216,32 @@ describe('writeSchema — API errors', () => {
   });
 });
 
+describe('writeSchema — namespace/key guard', () => {
+  afterEach(() => _resetInjections());
+
+  it('returns error when POST response has wrong namespace', async () => {
+    _injectFetch(recordingFetch([
+      { status: 200, body: { metafields: [] } },
+      { status: 201, body: { metafield: { id: 999, value: '{}', namespace: 'wrong_ns', key: 'schema_json' } } },
+    ], []));
+
+    const result = await writeSchema(makeInput());
+    assert.equal(result.ok, false);
+    assert.ok(result.error?.includes('wrong_ns'), result.error);
+  });
+
+  it('returns error when POST response has wrong key', async () => {
+    _injectFetch(recordingFetch([
+      { status: 200, body: { metafields: [] } },
+      { status: 201, body: { metafield: { id: 999, value: '{}', namespace: 'velocity_seo', key: 'description_tag' } } },
+    ], []));
+
+    const result = await writeSchema(makeInput());
+    assert.equal(result.ok, false);
+    assert.ok(result.error?.includes('description_tag'), result.error);
+  });
+});
+
 describe('writeSchema — never throws', () => {
   afterEach(() => _resetInjections());
 
