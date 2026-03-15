@@ -6,7 +6,7 @@ import type { AggregatedIssue, IssueAggregation } from '@tools/live/issue_aggreg
 import type { FixBatch, FixAttempt } from '@tools/live/live_fix_executor.js';
 import type { SystemHealthReport } from '@tools/live/live_run_orchestrator.js';
 
-// Mock data for demo
+// Simulated crawl data
 function mockDiscoverPages(): CrawlResult {
   const pages: DiscoveredPage[] = [
     { url: 'https://demo-store.com/', status_code: 200, depth: 0, page_type: 'homepage', priority: 'high', html_size_bytes: 45000 },

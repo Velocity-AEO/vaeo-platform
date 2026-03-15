@@ -14,7 +14,7 @@ const mockDeps = {
 export async function GET() {
   try {
     const cfg       = defaultShippingBarConfig();
-    const component = createComponent('demo-site', 'shipping_bar', 'VAEO Shipping Bar', cfg as unknown as Record<string, unknown>);
+    const component = createComponent('default-site', 'shipping_bar', 'VAEO Shipping Bar', cfg as unknown as Record<string, unknown>);
     const active    = updateComponentStatus(component, 'active');
     active.installed_at = new Date(Date.now() - 3600_000).toISOString();
 
@@ -41,8 +41,8 @@ export async function POST(req: NextRequest) {
     };
 
     const result = await deployShippingBar(
-      body.site_id ?? 'demo-site',
-      'demo.myshopify.com',
+      body.site_id ?? 'default-site',
+      'store.myshopify.com',
       body.config,
       body.dry_run ?? true,
       mockDeps,
@@ -62,8 +62,8 @@ export async function POST(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({})) as { component_id?: string };
-    const component = createComponent('demo-site', 'shipping_bar', 'VAEO Shipping Bar', {});
-    const result    = await removeShippingBar(component, 'demo.myshopify.com', {
+    const component = createComponent('default-site', 'shipping_bar', 'VAEO Shipping Bar', {});
+    const result    = await removeShippingBar(component, 'store.myshopify.com', {
       deleteSnippet: async () => ({ success: true }),
       revertTheme:   async () => ({ success: true }),
     });

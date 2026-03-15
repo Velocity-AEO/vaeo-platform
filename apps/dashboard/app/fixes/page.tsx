@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 
-// ── Demo data (hardcoded for VC demo) ─────────────────────────────────────────
+// ── Static fix data ──────────────────────────────────────────────────────────
 
 const SITE = 'cococabanalife.com';
 const HEALTH = { score: 56, grade: 'C' };
@@ -36,7 +36,7 @@ function SiteHeader() {
     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-8">
       <div>
         <h1 className="text-lg md:text-xl font-semibold text-slate-900 truncate max-w-xs md:max-w-none">{SITE}</h1>
-        <p className="text-xs text-slate-400 mt-0.5">Shopify · Operator Demo</p>
+        <p className="text-xs text-slate-400 mt-0.5">Shopify</p>
       </div>
       <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-xl px-4 py-2.5">
         <span className="text-xs text-slate-500 uppercase tracking-wide font-medium">Health</span>

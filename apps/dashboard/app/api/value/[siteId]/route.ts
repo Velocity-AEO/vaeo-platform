@@ -4,7 +4,7 @@ import type { SiteStats, RankingSnapshot, KeywordRanking } from '@tools/value/va
 import type { FixHistoryEntry } from '@tools/value/before_after.js';
 import type { FixHistoryPage } from '@tools/value/value_report.js';
 
-// ── Mock data ────────────────────────────────────────────────────────────────
+// ── Simulated data ───────────────────────────────────────────────────────────
 
 function mockStats(): SiteStats {
   return {
@@ -31,13 +31,13 @@ function mockRankings(site_id: string): RankingSnapshot {
 
 function mockHistory(): FixHistoryPage {
   const entries: FixHistoryEntry[] = [
-    { url: 'https://demo-store.com/', fix_type: 'title_missing', fix_label: 'Missing Title', field_name: 'title', before_value: '', after_value: 'Sustainable Fashion — Eco-Friendly Clothing | Demo Store', applied_at: new Date().toISOString() },
-    { url: 'https://demo-store.com/products/organic-tee', fix_type: 'meta_description_missing', fix_label: 'Missing Meta Description', field_name: 'meta_description', before_value: '', after_value: 'Shop our organic cotton t-shirt collection. Made from 100% GOTS-certified organic cotton. Free shipping on orders over $50. Sustainable fashion for everyday wear.', applied_at: new Date().toISOString() },
-    { url: 'https://demo-store.com/products/hemp-shirt', fix_type: 'image_alt_missing', fix_label: 'Missing Image Alt', field_name: 'alt', before_value: '', after_value: 'Hemp t-shirt in natural beige, front view on model', applied_at: new Date().toISOString() },
-    { url: 'https://demo-store.com/products/recycled-jacket', fix_type: 'schema_missing', fix_label: 'Missing Product Schema', field_name: 'jsonld', before_value: '', after_value: '{"@type":"Product","name":"Recycled Polyester Jacket","brand":"Demo Store"}', applied_at: new Date().toISOString() },
-    { url: 'https://demo-store.com/collections/all', fix_type: 'title_missing', fix_label: 'Missing Title', field_name: 'title', before_value: 'All', after_value: 'All Products — Sustainable Clothing Collection | Demo Store', applied_at: new Date().toISOString() },
-    { url: 'https://demo-store.com/pages/about', fix_type: 'meta_description_missing', fix_label: 'Missing Meta Description', field_name: 'meta_description', before_value: 'About us', after_value: 'Learn about our mission to make sustainable fashion accessible. We source ethical materials and partner with fair-trade factories to create clothing you can feel good about.', applied_at: new Date().toISOString() },
-    { url: 'https://demo-store.com/products/bamboo-dress', fix_type: 'image_alt_missing', fix_label: 'Missing Image Alt', field_name: 'alt', before_value: 'img', after_value: 'Bamboo fabric summer dress in sage green, displayed on wooden hanger', applied_at: new Date().toISOString() },
+    { url: 'https://example-client.com/', fix_type: 'title_missing', fix_label: 'Missing Title', field_name: 'title', before_value: '', after_value: 'Sustainable Fashion — Eco-Friendly Clothing | Example Client', applied_at: new Date().toISOString() },
+    { url: 'https://example-client.com/products/organic-tee', fix_type: 'meta_description_missing', fix_label: 'Missing Meta Description', field_name: 'meta_description', before_value: '', after_value: 'Shop our organic cotton t-shirt collection. Made from 100% GOTS-certified organic cotton. Free shipping on orders over $50. Sustainable fashion for everyday wear.', applied_at: new Date().toISOString() },
+    { url: 'https://example-client.com/products/hemp-shirt', fix_type: 'image_alt_missing', fix_label: 'Missing Image Alt', field_name: 'alt', before_value: '', after_value: 'Hemp t-shirt in natural beige, front view on model', applied_at: new Date().toISOString() },
+    { url: 'https://example-client.com/products/recycled-jacket', fix_type: 'schema_missing', fix_label: 'Missing Product Schema', field_name: 'jsonld', before_value: '', after_value: '{"@type":"Product","name":"Recycled Polyester Jacket","brand":"Example Client"}', applied_at: new Date().toISOString() },
+    { url: 'https://example-client.com/collections/all', fix_type: 'title_missing', fix_label: 'Missing Title', field_name: 'title', before_value: 'All', after_value: 'All Products — Sustainable Clothing Collection | Example Client', applied_at: new Date().toISOString() },
+    { url: 'https://example-client.com/pages/about', fix_type: 'meta_description_missing', fix_label: 'Missing Meta Description', field_name: 'meta_description', before_value: 'About us', after_value: 'Learn about our mission to make sustainable fashion accessible. We source ethical materials and partner with fair-trade factories to create clothing you can feel good about.', applied_at: new Date().toISOString() },
+    { url: 'https://example-client.com/products/bamboo-dress', fix_type: 'image_alt_missing', fix_label: 'Missing Image Alt', field_name: 'alt', before_value: 'img', after_value: 'Bamboo fabric summer dress in sage green, displayed on wooden hanger', applied_at: new Date().toISOString() },
   ];
   return { entries, total: entries.length };
 }

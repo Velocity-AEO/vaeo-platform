@@ -52,7 +52,7 @@ const ALL_PHASES = [
 ];
 
 export default function LiveRunPage() {
-  const [domain, setDomain] = useState('demo-store.com');
+  const [domain, setDomain] = useState('');
   const [platform, setPlatform] = useState<'shopify' | 'wordpress'>('shopify');
   const [dryRun, setDryRun] = useState(false);
   const [maxPages, setMaxPages] = useState(50);

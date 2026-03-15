@@ -11,7 +11,7 @@ export async function GET(
   try {
     // TODO: check admin session — return 403 if not admin
 
-    // Simulated platform health for POV
+    // Simulated platform health
     const result = {
       generated_at: new Date().toISOString(),
       total_sites: 3,
@@ -30,7 +30,7 @@ export async function GET(
       sites_needing_attention: [
         {
           site_id: 'site_2',
-          domain: 'demo-store.myshopify.com',
+          domain: 'example-client.myshopify.com',
           orphaned_count: 8,
           broken_external_count: 6,
           velocity_alerts: 2,
@@ -53,7 +53,7 @@ export async function GET(
         },
         {
           site_id: 'site_2',
-          domain: 'demo-store.myshopify.com',
+          domain: 'example-client.myshopify.com',
           last_built: new Date(Date.now() - 30 * 60 * 60 * 1000).toISOString(),
           pages_mapped: 89,
           build_age_hours: 30,

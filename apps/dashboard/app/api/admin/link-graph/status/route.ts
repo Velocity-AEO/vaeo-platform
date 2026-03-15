@@ -11,7 +11,7 @@ export async function GET(
   try {
     // TODO: check admin session — return 403 if not admin
 
-    // Simulated platform-wide status for POV
+    // Simulated platform-wide status
     const result = {
       sites: [
         {
@@ -32,7 +32,7 @@ export async function GET(
         },
         {
           site_id: 'site_2',
-          domain: 'demo-store.myshopify.com',
+          domain: 'example-client.myshopify.com',
           page_count: 89,
           internal_link_count: 654,
           external_link_count: 42,
@@ -58,7 +58,7 @@ export async function GET(
       avg_health_grade: 'C',
       worst_sites: [{
         site_id: 'site_2',
-        domain: 'demo-store.myshopify.com',
+        domain: 'example-client.myshopify.com',
         health_grade: 'D',
         orphaned_count: 8,
         canonical_conflict_count: 7,
@@ -66,7 +66,7 @@ export async function GET(
       }],
       stale_sites: [{
         site_id: 'site_2',
-        domain: 'demo-store.myshopify.com',
+        domain: 'example-client.myshopify.com',
         build_age_hours: 30,
       }],
     };
