@@ -4,6 +4,12 @@
  * Triggers the schema fix pipeline for a site.
  * Mirrors the logic in scripts/run_schema_fix.ts — same tools, same flow.
  * Never throws — returns { applied, failed, skipped, results }.
+ *
+ * Approval contract:
+ *   This route ONLY processes items already at execution_status='approved'.
+ *   It NEVER sets execution_status='approved'. Approval is the exclusive
+ *   responsibility of POST /api/sites/[siteId]/fixes with action='approve'.
+ *   Successful items → 'deployed'. Failed items → 'failed'.
  */
 
 import { NextResponse } from 'next/server';

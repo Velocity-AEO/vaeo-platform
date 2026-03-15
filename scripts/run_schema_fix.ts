@@ -3,6 +3,13 @@
  *
  * Applies schema fixes for approved SCHEMA_MISSING items for a given site.
  *
+ * IMPORTANT — approval contract:
+ *   This script ONLY consumes items that are already execution_status='approved'.
+ *   It NEVER sets execution_status='approved'. Only the dashboard UI approval
+ *   action (POST /api/sites/[siteId]/fixes with action='approve') may do that.
+ *   Items must arrive here as 'approved' via explicit user action in the UI.
+ *   Successful items → 'deployed'. Failed items → 'failed'.
+ *
  * For each item:
  *   1. Route URL → resource type (product / collection / page / article / blog)
  *   2. Fetch numeric Shopify resource ID from Admin API using the URL handle
