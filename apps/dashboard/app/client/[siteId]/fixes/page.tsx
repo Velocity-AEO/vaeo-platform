@@ -16,6 +16,7 @@ interface Fix {
   confidence:     number;
   applied_at?:    string;
   original_value?: string | null;
+  proposed_fix?:  Record<string, unknown>;
 }
 
 export default function ClientFixesPage() {
@@ -142,6 +143,20 @@ export default function ClientFixesPage() {
             {/* Expanded section */}
             {expanded && (
               <div className="ml-7 mt-2 mb-3 p-4 bg-gray-50 border border-gray-200 rounded-lg">
+                {/* JSON-LD preview for SCHEMA_ fixes */}
+                {fix.issue?.startsWith('SCHEMA_') && fix.proposed_fix && (() => {
+                  const raw = fix.proposed_fix.json_ld ?? fix.proposed_fix.jsonLd ?? fix.proposed_fix.schema ?? fix.proposed_fix.content ?? fix.proposed_fix.template;
+                  if (!raw) return null;
+                  const content = typeof raw === 'string' ? raw : JSON.stringify(raw, null, 2);
+                  return (
+                    <div className="mb-4">
+                      <p className="text-xs font-medium text-purple-700 mb-2">What will be injected</p>
+                      <pre className="p-3 bg-slate-900 text-green-300 text-xs font-mono rounded-lg overflow-x-auto max-h-80 whitespace-pre-wrap break-words">
+                        {content}
+                      </pre>
+                    </div>
+                  );
+                })()}
                 <p className="text-xs font-medium text-slate-500 mb-3">Before/After Screenshots</p>
                 <ViewportScreenshotStrip fix_id={fix.fix_id} site_id={siteId} />
               </div>

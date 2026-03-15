@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import type { ActionQueueRow } from '@/lib/types';
 import StatusBadge from '@/components/StatusBadge';
 
@@ -54,6 +54,58 @@ function fixPreview(fix: Record<string, unknown>): string {
     }
   }
   return '—';
+}
+
+/** Check if a row has expandable JSON-LD content (SCHEMA_MISSING fixes). */
+function hasJsonLdContent(row: ActionQueueRow): boolean {
+  if (!row.issue_type.startsWith('SCHEMA_')) return false;
+  const fix = row.proposed_fix;
+  return !!(fix.json_ld || fix.jsonLd || fix.schema || fix.content || fix.template);
+}
+
+/** Extract the JSON-LD payload from a proposed_fix object. */
+function extractJsonLd(fix: Record<string, unknown>): string | null {
+  const raw = fix.json_ld ?? fix.jsonLd ?? fix.schema ?? fix.content ?? fix.template;
+  if (!raw) return null;
+  if (typeof raw === 'string') return raw;
+  try { return JSON.stringify(raw, null, 2); } catch { return null; }
+}
+
+// ── Collapsible JSON-LD block ────────────────────────────────────────────────
+
+function JsonLdBlock({ fix }: { fix: Record<string, unknown> }) {
+  const [open, setOpen] = useState(false);
+  const content = extractJsonLd(fix);
+  if (!content) return null;
+
+  return (
+    <div className="mt-2">
+      <button
+        onClick={(e) => { e.stopPropagation(); setOpen(!open); }}
+        className="flex items-center gap-1.5 text-[11px] font-medium text-purple-700 hover:text-purple-900 transition-colors"
+      >
+        <svg
+          className={`w-3 h-3 transition-transform ${open ? 'rotate-90' : ''}`}
+          viewBox="0 0 16 16"
+          fill="none"
+        >
+          <path
+            d="M6 4l4 4-4 4"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+        What will be injected
+      </button>
+      {open && (
+        <pre className="mt-2 p-3 bg-slate-900 text-green-300 text-xs font-mono rounded-lg overflow-x-auto max-h-80 whitespace-pre-wrap break-words">
+          {content}
+        </pre>
+      )}
+    </div>
+  );
 }
 
 // ── Filter tabs ───────────────────────────────────────────────────────────────
@@ -163,14 +215,15 @@ export default function ActionQueueTable({
                   <StatusBadge status={row.execution_status} size="sm" />
                 </td>
 
-                {/* Proposed fix — key field preview */}
-                <td className="px-4 py-3 max-w-[240px]">
+                {/* Proposed fix — key field preview + expandable JSON-LD */}
+                <td className="px-4 py-3 max-w-[320px]">
                   <span
                     className="text-xs text-slate-500 block truncate"
                     title={JSON.stringify(row.proposed_fix, null, 2)}
                   >
                     {fixPreview(row.proposed_fix)}
                   </span>
+                  {hasJsonLdContent(row) && <JsonLdBlock fix={row.proposed_fix} />}
                 </td>
               </tr>
             ))}

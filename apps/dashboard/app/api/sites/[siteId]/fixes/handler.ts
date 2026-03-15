@@ -34,6 +34,7 @@ export interface FixItem {
   confidence:      number;
   status:          string;
   reasoning_block: Record<string, unknown> | null;
+  proposed_fix?:   Record<string, unknown>;
 }
 
 export interface GetFixesResult {
@@ -98,7 +99,7 @@ export async function getFixes(siteId: string, deps: FixesDeps): Promise<GetFixe
         (s) => s.url === action.url && s.field_type === field,
       );
 
-      return {
+      const item: FixItem = {
         id:              action.id,
         url:             action.url,
         issue_type:      action.issue_type,
@@ -108,6 +109,11 @@ export async function getFixes(siteId: string, deps: FixesDeps): Promise<GetFixe
         status:          action.execution_status,
         reasoning_block: action.reasoning_block,
       };
+      // Include raw proposed_fix for SCHEMA_ issues so UI can show JSON-LD
+      if (action.issue_type.startsWith('SCHEMA_')) {
+        item.proposed_fix = action.proposed_fix;
+      }
+      return item;
     });
 
     return { fixes };
