@@ -39,11 +39,12 @@ export interface TopIssue {
 }
 
 export interface SiteHealthData {
-  site_id: string;
-  domain: string;
-  health_score: number;
-  grade: string;
+  site_id:   string;
+  site_url:  string;
+  cms_type:  string;
+  score:     { total: number; technical: number; content: number; schema: number; grade: string };
   issues_by_severity: { critical: number; major: number; minor: number };
+  total_issues: number;
   top_issues: TopIssue[];
   last_updated: string | null;
 }
@@ -154,13 +155,20 @@ export async function getHealthData(
     ok: true,
     status: 200,
     data: {
-      site_id:            site.site_id,
-      domain:             site.site_url,
-      health_score:       score.total,
-      grade:              score.grade,
+      site_id:  site.site_id,
+      site_url: site.site_url,
+      cms_type: site.cms_type,
+      score: {
+        total:     score.total,
+        technical: score.technical,
+        content:   score.content,
+        schema:    score.schema,
+        grade:     score.grade,
+      },
       issues_by_severity,
+      total_issues: issues.length,
       top_issues,
-      last_updated:       lastUpdated,
+      last_updated: lastUpdated,
     },
   };
 }

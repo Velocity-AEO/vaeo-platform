@@ -83,20 +83,40 @@ describe('classifyIssueSeverity', () => {
 describe('getHealthData', () => {
   // ── Happy paths ─────────────────────────────────────────────────────────────
 
-  it('no open issues → health_score=100, grade=A, empty top_issues, all severity counts=0', async () => {
+  it('no open issues → score.total=100, score.grade=A, empty top_issues, all severity counts=0', async () => {
     const result = await getHealthData(SITE_ID, makeDeps());
     assert.equal(result.ok, true);
     assert.equal(result.status, 200);
     const d = result.data!;
-    assert.equal(d.health_score, 100);
-    assert.equal(d.grade, 'A');
+    assert.equal(d.score.total, 100);
+    assert.equal(d.score.grade, 'A');
     assert.deepEqual(d.top_issues, []);
     assert.deepEqual(d.issues_by_severity, { critical: 0, major: 0, minor: 0 });
   });
 
-  it('domain = site.site_url', async () => {
+  it('site_url = site.site_url', async () => {
     const result = await getHealthData(SITE_ID, makeDeps());
-    assert.equal(result.data!.domain, 'https://example.com');
+    assert.equal(result.data!.site_url, 'https://example.com');
+  });
+
+  it('cms_type = site.cms_type', async () => {
+    const result = await getHealthData(SITE_ID, makeDeps());
+    assert.equal(result.data!.cms_type, 'shopify');
+  });
+
+  it('total_issues = number of open issues', async () => {
+    const issues = [makeIssue({ id: '1' }), makeIssue({ id: '2' })];
+    const result = await getHealthData(SITE_ID, makeDeps({ getOpenIssues: async () => issues }));
+    assert.equal(result.data!.total_issues, 2);
+  });
+
+  it('score includes technical, content, schema sub-scores', async () => {
+    const result = await getHealthData(SITE_ID, makeDeps());
+    const s = result.data!.score;
+    assert.equal(typeof s.technical, 'number');
+    assert.equal(typeof s.content, 'number');
+    assert.equal(typeof s.schema, 'number');
+    assert.equal(s.total, s.technical + s.content + s.schema);
   });
 
   it('site_id echoed in response', async () => {
@@ -114,16 +134,16 @@ describe('getHealthData', () => {
     assert.equal(result.data!.last_updated, null);
   });
 
-  it('health_score decreases when ERR_404 issues present', async () => {
+  it('score.total decreases when ERR_404 issues present', async () => {
     const issues = [
       makeIssue({ id: '1', issue_type: 'ERR_404' }),
       makeIssue({ id: '2', issue_type: 'ERR_404' }),
     ];
     const result = await getHealthData(SITE_ID, makeDeps({ getOpenIssues: async () => issues }));
-    assert.ok(result.data!.health_score < 100, `expected score < 100, got ${result.data!.health_score}`);
+    assert.ok(result.data!.score.total < 100, `expected score < 100, got ${result.data!.score.total}`);
   });
 
-  it('grade is F when enough critical issues present', async () => {
+  it('score.grade is F when enough critical issues present', async () => {
     // 3 ERR_404 (8pts each capped at 24) + 3 ERR_500 (8 each capped at 24)
     // technical = 40 - 24 - 24 = max(0) = 0; content+schema = 35+25 = 60? No wait...
     // Actually: technical = max(0, 40 - 24 - 24) = 0; content = 35; schema = 25; total = 60 → C
@@ -136,8 +156,8 @@ describe('getHealthData', () => {
     ];
     const result = await getHealthData(SITE_ID, makeDeps({ getOpenIssues: async () => issues }));
     // technical = max(0, 40-24) = 16, content = max(0, 35-20-15) = 0, schema = max(0, 25-12) = 13 → total = 29 → F
-    assert.ok(result.data!.health_score < 30, `Expected grade F score, got ${result.data!.health_score}`);
-    assert.equal(result.data!.grade, 'F');
+    assert.ok(result.data!.score.total < 30, `Expected grade F score, got ${result.data!.score.total}`);
+    assert.equal(result.data!.score.grade, 'F');
   });
 
   // ── issues_by_severity ────────────────────────────────────────────────────
